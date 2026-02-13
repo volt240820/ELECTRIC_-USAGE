@@ -73,6 +73,51 @@ const compressImage = async (file: File): Promise<string> => {
   });
 };
 
+// NEW: Create a tiny thumbnail for URL sharing (< 2KB target)
+export const createThumbnail = async (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.src = url;
+      
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let { width, height } = img;
+        
+        // Ultra-aggressive resize for URL sharing (max 120px width)
+        const MAX_SIZE = 120;
+        if (width > height && width > MAX_SIZE) {
+          height = Math.round((height * MAX_SIZE) / width);
+          width = MAX_SIZE;
+        } else if (height > width && height > MAX_SIZE) {
+          width = Math.round((width * MAX_SIZE) / height);
+          height = MAX_SIZE;
+        }
+  
+        canvas.width = width;
+        canvas.height = height;
+        
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            resolve(""); // Fail gracefully
+            return;
+        }
+        
+        // Draw
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Low quality JPEG
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.4); 
+        URL.revokeObjectURL(url);
+        resolve(dataUrl.split(',')[1]); 
+      };
+      
+      img.onerror = () => resolve("");
+    });
+  };
+
 // Helper function for delay
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 

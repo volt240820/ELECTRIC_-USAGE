@@ -15,6 +15,7 @@ interface AnalysisItem {
   // Assignment data
   assignment: MeterAssignment;
   isShared?: boolean; // Flag to indicate if this item came from a shared link
+  thumbnailUrl?: string; // NEW: Store base64 thumbnail for shared view
 }
 
 const DEFAULT_TENANTS: Tenant[] = [
@@ -44,7 +45,7 @@ const App: React.FC = () => {
     if (shareData) {
       try {
         const decoded = JSON.parse(decodeURIComponent(shareData));
-        // Structure: { t: tenantName, p: unitPrice, i: [ { n: name, s: startVal, e: endVal, u: usage, sd: startDate, ed: endDate } ] }
+        // Structure: { t: tenantName, p: unitPrice, i: [ { n: name, s: startVal, e: endVal, u: usage, sd: startDate, ed: endDate, img: base64(optional) } ] }
         
         const sharedTenantId = 'shared-tenant';
         
@@ -60,28 +61,32 @@ const App: React.FC = () => {
         setTenants([sharedTenant]);
 
         // 3. Reconstruct Items
-        const reconstructedItems: AnalysisItem[] = decoded.i.map((item: any, idx: number) => ({
-          id: `shared-${idx}`,
-          file: new File([""], "Image_Not_Available_In_Share_Mode", { type: "text/plain" }), // Dummy file
-          status: 'success',
-          isShared: true,
-          assignment: {
-            tenantId: sharedTenantId,
-            meterName: item.n
-          },
-          result: {
-            startReading: { value: item.s, date: item.sd },
-            endReading: { value: item.e, date: item.ed },
-            usage: item.u
-          }
-        }));
+        const reconstructedItems: AnalysisItem[] = decoded.i.map((item: any, idx: number) => {
+          // If we have an image string, try to convert it back to a Blob/File (optional, or just use it as source)
+          // For simplicity, we just store it as a special property
+          return {
+            id: `shared-${idx}`,
+            file: new File([""], "Evidence_On_File", { type: "text/plain" }), // Dummy file
+            status: 'success',
+            isShared: true,
+            thumbnailUrl: item.img ? `data:image/jpeg;base64,${item.img}` : undefined,
+            assignment: {
+              tenantId: sharedTenantId,
+              meterName: item.n
+            },
+            result: {
+              startReading: { value: item.s, date: item.sd },
+              endReading: { value: item.e, date: item.ed },
+              usage: item.u
+            }
+          };
+        });
 
         setItems(reconstructedItems);
         setIsSharedView(true);
         setActiveTab('invoice');
         
-        // Remove query param from URL so refresh doesn't stick (optional, but good for UX if they want to upload new stuff)
-        // window.history.replaceState({}, document.title, window.location.pathname);
+        // Clean URL but keep history state? No, keep it so they can refresh.
       } catch (e) {
         console.error("Failed to parse shared data", e);
         alert("Invalid shared link.");
@@ -187,7 +192,8 @@ const App: React.FC = () => {
         result: item.result!,
         file: item.file,
         cost: Math.floor(item.result!.usage * unitPrice),
-        isShared: item.isShared
+        isShared: item.isShared,
+        thumbnailUrl: item.thumbnailUrl
       }));
 
       const totalUsage = itemsWithCost.reduce((acc, curr) => acc + curr.result.usage, 0);
@@ -216,7 +222,9 @@ const App: React.FC = () => {
              </div>
              <h1 className="text-xl font-bold text-gray-800">Meter Bill Manager</h1>
              {isSharedView && (
-               <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full font-bold border border-yellow-200">Shared View Mode</span>
+               <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full font-bold border border-yellow-200 animate-pulse">
+                 Reader View
+               </span>
              )}
           </div>
 
@@ -245,9 +253,11 @@ const App: React.FC = () => {
              {isSharedView && (
                <button 
                  onClick={() => {
-                   window.location.href = window.location.origin;
+                   if(confirm("Create your own invoice?")) {
+                      window.location.href = window.location.origin;
+                   }
                  }}
-                 className="text-sm text-blue-600 hover:underline"
+                 className="text-xs text-gray-400 hover:text-blue-600 hover:underline"
                >
                  Create New Bill
                </button>
