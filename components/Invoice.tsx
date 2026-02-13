@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Tenant, AnalysisResult } from '../types';
-import { Printer, Mail, FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff, Share2, Copy } from 'lucide-react';
+import { FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff, Share2, Copy, Check, ImageIcon } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
-import { createThumbnail } from '../services/geminiService';
 
 interface InvoiceData {
   tenant: Tenant;
@@ -13,7 +12,7 @@ interface InvoiceData {
     file: File;
     cost: number;
     isShared?: boolean;
-    thumbnailUrl?: string; // New: optional thumbnail from shared link
+    thumbnailUrl?: string;
   }[];
   totalUsage: number;
   totalCost: number;
@@ -25,18 +24,31 @@ interface InvoiceProps {
   isSharedView?: boolean;
 }
 
-// Updated props to include onImageClick handler
+// Toast Notification Component
+const Toast: React.FC<{ message: string; onClose: () => void }> = ({ message, onClose }) => {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 3000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  return (
+    <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 animate-fade-in-up z-[9999]">
+      <div className="bg-green-500 rounded-full p-1">
+        <Check className="w-3 h-3 text-white" />
+      </div>
+      <span className="text-sm font-medium">{message}</span>
+    </div>
+  );
+};
+
 const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url: string) => void }> = ({ item, onImageClick }) => {
   const [preview, setPreview] = useState<string>('');
 
   useEffect(() => {
-    // If it's shared and has a thumbnail, use that
     if (item.isShared && item.thumbnailUrl) {
         setPreview(item.thumbnailUrl);
         return;
     }
-
-    // Only create object URL if it's not a shared/dummy file
     if (!item.isShared && item.file.size > 0) {
         const url = URL.createObjectURL(item.file);
         setPreview(url);
@@ -67,7 +79,7 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
                 <img 
                     src={preview} 
                     alt="Meter Proof" 
-                    className={`w-full h-40 object-contain bg-black/5 rounded border border-gray-200 transition-transform group-hover:brightness-90 ${item.isShared ? 'pixelated blur-[1px]' : ''}`} 
+                    className="w-full h-40 object-contain bg-black/5 rounded border border-gray-200 transition-transform group-hover:brightness-90" 
                 />
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     <div className="bg-black/50 text-white p-2 rounded-full backdrop-blur-sm">
@@ -78,7 +90,7 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
            ) : (
                <div className="w-full h-40 bg-gray-50 rounded border border-gray-200 border-dashed flex flex-col items-center justify-center text-gray-400 p-4 text-center">
                    <ImageOff className="w-8 h-8 mb-2 opacity-50" />
-                   <p className="text-[10px] leading-tight">Image not available in link</p>
+                   <p className="text-[10px] leading-tight text-gray-400">Image not included in link</p>
                </div>
            )}
         </div>
@@ -88,16 +100,17 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
 };
 
 export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedView }) => {
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [isCreatingLink, setIsCreatingLink] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const showToast = (msg: string) => setToastMsg(msg);
 
   const handleDownloadPDF = async () => {
-    setIsGeneratingPdf(true);
+    setIsProcessing(true);
     const pdf = new jsPDF('p', 'mm', 'a4');
     
     try {
-      // In Shared View, the tenant might see only one invoice
       for (let i = 0; i < invoices.length; i++) {
         const element = document.getElementById(`invoice-card-${i}`);
         if (!element) continue;
@@ -121,73 +134,105 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
       }
 
       pdf.save(`Invoice_${invoices[0]?.tenant.name || 'Electricity'}.pdf`);
+      showToast("PDF Downloaded!");
     } catch (error) {
       console.error("PDF Generation failed:", error);
-      alert("Failed to generate PDF. Please try again.");
+      showToast("Failed to generate PDF");
     } finally {
-      setIsGeneratingPdf(false);
+      setIsProcessing(false);
     }
   };
 
-  const handleShareLink = async (invoice: InvoiceData) => {
-      setIsCreatingLink(true);
-      try {
-        // 1. Process items to include tiny thumbnails if possible
-        const processedItems = await Promise.all(invoice.items.map(async (item) => {
-            let thumb = "";
+  // 1. Share as Image (The "Card" Experience)
+  const handleShareImage = async (invoice: InvoiceData, index: number) => {
+    setIsProcessing(true);
+    try {
+      const element = document.getElementById(`invoice-card-${index}`);
+      if (!element) return;
+
+      // Capture high-res image
+      const canvas = await html2canvas(element, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff'
+      });
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) throw new Error("Image generation failed");
+        
+        const fileName = `Bill_${invoice.tenant.name.replace(/\s+/g, '_')}.png`;
+        const file = new File([blob], fileName, { type: 'image/png' });
+
+        // Native Sharing (Mobile - KakaoTalk etc)
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
             try {
-                // Only generate thumbnail if it's an original file and not already shared
-                if (!item.isShared && item.file.size > 0) {
-                     thumb = await createThumbnail(item.file);
-                }
-            } catch (e) { console.warn("Thumb failed", e); }
-            
-            return {
+                await navigator.share({
+                    files: [file],
+                    title: `Invoice - ${invoice.tenant.name}`,
+                    text: `Here is the electricity invoice for ${invoice.tenant.name}.`
+                });
+                showToast("Opened Share Sheet!");
+            } catch (shareError) {
+                // User cancelled or failed
+                console.log('Share cancelled', shareError);
+            }
+        } else {
+            // Desktop Fallback
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast("Image Downloaded! Send this file manually.");
+        }
+      }, 'image/png');
+
+    } catch (error) {
+      console.error("Image share failed:", error);
+      showToast("Failed to create image");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // 2. Share as Link (Data Only - Short URL)
+  const handleCopyLink = async (invoice: InvoiceData) => {
+      try {
+        // Construct payload WITHOUT images to keep URL short
+        const payload = {
+            t: invoice.tenant.name, 
+            p: unitPrice,           
+            i: invoice.items.map(item => ({
                 n: item.meterName,
                 s: item.result.startReading.value,
                 sd: item.result.startReading.date,
                 e: item.result.endReading.value,
                 ed: item.result.endReading.date,
-                u: item.result.usage,
-                img: thumb // Include tiny base64
-            };
-        }));
-
-        // 2. Construct payload
-        const payload = {
-            t: invoice.tenant.name, 
-            p: unitPrice,           
-            i: processedItems
+                u: item.result.usage
+                // No 'img' field here
+            }))
         };
 
         const jsonStr = JSON.stringify(payload);
         const encoded = encodeURIComponent(jsonStr);
-        
-        // 3. Construct URL
         const shareUrl = `${window.location.origin}/?share=${encoded}`;
         
-        // 4. Check URL length safety (browsers support large URLs but chat apps might not)
-        // If it's too huge, warn user or strip images? We'll try to send it.
-        // The thumbnail function targets < 2KB per image, so 3 images ~ 6KB + JSON. Should be OK for Clipboard.
-        
-        // 5. Construct "Rich" Text Message for Kakao
         const dateStr = new Date().toLocaleDateString();
-        const msg = `[전기요금 청구서 도착]
+        const msg = `[전기요금 청구서]
 수신: ${invoice.tenant.name}
 금액: ₩${Math.floor(invoice.totalCost * 1.1).toLocaleString()}
-작성일: ${dateStr}
+기간: ${dateStr}
 
-▼ 청구서 확인 및 PDF 다운로드
+▼ 상세 내역 확인 (사진 별도)
 ${shareUrl}`;
 
         await navigator.clipboard.writeText(msg);
-        alert('✅ Link Copied!\n\nPaste this message directly into KakaoTalk.\n\n(Note: Includes low-res thumbnails for verification)');
+        showToast("Link Copied to Clipboard!");
 
       } catch (err) {
           console.error('Failed to copy: ', err);
-          alert("Failed to create link.");
-      } finally {
-          setIsCreatingLink(false);
+          showToast("Failed to copy link");
       }
   };
 
@@ -196,17 +241,19 @@ ${shareUrl}`;
   return (
     <div className="space-y-12 print:space-y-0 print:block">
       
+      {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg(null)} />}
+
       {/* SHARED VIEW: Tenant Banner */}
       {isSharedView && (
           <div className="bg-blue-600 text-white p-6 rounded-xl shadow-lg mb-8 text-center animate-fade-in print:hidden">
-              <h2 className="text-xl font-bold mb-2">Electricity Bill Received</h2>
-              <p className="opacity-90 mb-6 text-sm">Please review the details below. You can download the official PDF.</p>
+              <h2 className="text-xl font-bold mb-2">Electricity Bill Details</h2>
+              <p className="opacity-90 mb-6 text-sm">Use the button below to save the official document.</p>
               <button 
                 onClick={handleDownloadPDF}
                 className="bg-white text-blue-700 hover:bg-blue-50 px-6 py-3 rounded-full font-bold shadow-md inline-flex items-center gap-2 transform active:scale-95 transition-all"
               >
                   <Download className="w-5 h-5" />
-                  Download PDF Invoice
+                  Download PDF
               </button>
           </div>
       )}
@@ -216,22 +263,21 @@ ${shareUrl}`;
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center mb-8 print:hidden relative z-40">
             <div>
             <h2 className="font-bold text-gray-800">Generated Invoices ({invoices.length})</h2>
-            <p className="text-sm text-gray-500">Share links or download PDFs.</p>
+            <p className="text-sm text-gray-500">Share as image card or copy link.</p>
             </div>
             <button 
                 onClick={handleDownloadPDF}
-                disabled={isGeneratingPdf}
+                disabled={isProcessing}
                 type="button"
                 className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors text-sm"
             >
-                {isGeneratingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                 PDF
             </button>
         </div>
       )}
 
       {invoices.map((invoice, idx) => (
-        // Added ID for html2canvas targeting
         <div 
           key={invoice.tenant.id} 
           id={`invoice-card-${idx}`}
@@ -244,15 +290,26 @@ ${shareUrl}`;
                 className="absolute top-4 right-4 flex gap-2 print:hidden opacity-0 group-hover:opacity-100 transition-opacity z-10"
                 data-html2canvas-ignore="true"
             >
+                {/* Primary: Share Image (Card) */}
                 <button 
-                onClick={() => handleShareLink(invoice)}
-                type="button"
-                disabled={isCreatingLink}
+                onClick={() => handleShareImage(invoice, idx)}
+                disabled={isProcessing}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full shadow-lg cursor-pointer transform hover:scale-105 transition-all flex items-center gap-2 font-bold text-sm"
-                title="Copy Smart Link for KakaoTalk"
+                title="Send as Image Card (Best Quality)"
                 >
-                {isCreatingLink ? <Loader2 className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
-                Copy Link
+                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                    Share Card
+                </button>
+
+                 {/* Secondary: Copy Link */}
+                 <button 
+                onClick={() => handleCopyLink(invoice)}
+                disabled={isProcessing}
+                className="bg-white hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-full shadow-md border border-gray-200 cursor-pointer transform hover:scale-105 transition-all flex items-center gap-2 font-medium text-sm"
+                title="Copy Data Link (No Photos)"
+                >
+                    <Link className="w-4 h-4" />
+                    Link
                 </button>
             </div>
           )}

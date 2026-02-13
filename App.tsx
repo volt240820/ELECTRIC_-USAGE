@@ -15,7 +15,7 @@ interface AnalysisItem {
   // Assignment data
   assignment: MeterAssignment;
   isShared?: boolean; // Flag to indicate if this item came from a shared link
-  thumbnailUrl?: string; // NEW: Store base64 thumbnail for shared view
+  thumbnailUrl?: string; // Store base64 thumbnail for shared view
 }
 
 const DEFAULT_TENANTS: Tenant[] = [
@@ -45,7 +45,7 @@ const App: React.FC = () => {
     if (shareData) {
       try {
         const decoded = JSON.parse(decodeURIComponent(shareData));
-        // Structure: { t: tenantName, p: unitPrice, i: [ { n: name, s: startVal, e: endVal, u: usage, sd: startDate, ed: endDate, img: base64(optional) } ] }
+        // Structure: { t: tenantName, p: unitPrice, i: [ { n: name, s: startVal, e: endVal, u: usage, sd: startDate, ed: endDate, img?: base64 } ] }
         
         const sharedTenantId = 'shared-tenant';
         
@@ -62,11 +62,10 @@ const App: React.FC = () => {
 
         // 3. Reconstruct Items
         const reconstructedItems: AnalysisItem[] = decoded.i.map((item: any, idx: number) => {
-          // If we have an image string, try to convert it back to a Blob/File (optional, or just use it as source)
-          // For simplicity, we just store it as a special property
           return {
             id: `shared-${idx}`,
-            file: new File([""], "Evidence_On_File", { type: "text/plain" }), // Dummy file
+            // We use a dummy file. If img is missing, the invoice component will handle the empty state.
+            file: new File([""], "Evidence_On_File", { type: "text/plain" }), 
             status: 'success',
             isShared: true,
             thumbnailUrl: item.img ? `data:image/jpeg;base64,${item.img}` : undefined,
@@ -86,10 +85,9 @@ const App: React.FC = () => {
         setIsSharedView(true);
         setActiveTab('invoice');
         
-        // Clean URL but keep history state? No, keep it so they can refresh.
       } catch (e) {
         console.error("Failed to parse shared data", e);
-        alert("Invalid shared link.");
+        // Don't alert here to avoid blocking UI on load, just fail silently or show a toast if we had one global
       }
     }
   }, []);
