@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Tenant, AnalysisResult } from '../types';
-import { FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff, Share2, Copy, Check, ImageIcon } from 'lucide-react';
+import { FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff, Share2, Copy, Check, ImageIcon, BellRing, MousePointerClick } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -36,7 +36,7 @@ const Toast: React.FC<{ message: string; onClose: () => void }> = ({ message, on
       <div className="bg-green-500 rounded-full p-1">
         <Check className="w-3 h-3 text-white" />
       </div>
-      <span className="text-sm font-medium">{message}</span>
+      <span className="text-sm font-medium whitespace-nowrap">{message}</span>
     </div>
   );
 };
@@ -106,7 +106,8 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
 
   const showToast = (msg: string) => setToastMsg(msg);
 
-  const handleDownloadPDF = async () => {
+  const handleDownloadPDF = async (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
     setIsProcessing(true);
     const pdf = new jsPDF('p', 'mm', 'a4');
     
@@ -143,95 +144,101 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
     }
   };
 
-  // 1. Share as Image (The "Card" Experience)
-  const handleShareImage = async (invoice: InvoiceData, index: number) => {
+  // 1. Generate "Notification Card" (The 'Soomgo' style card)
+  const handleShareSummaryCard = async (e: React.MouseEvent, invoice: InvoiceData, index: number) => {
+    e.preventDefault();
+    e.stopPropagation();
     setIsProcessing(true);
-    try {
-      const element = document.getElementById(`invoice-card-${index}`);
-      if (!element) return;
 
-      // Capture high-res image
-      const canvas = await html2canvas(element, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: '#ffffff'
+    try {
+      const cardElement = document.getElementById(`summary-card-template-${index}`);
+      if (!cardElement) throw new Error("Card template not found");
+
+      // Make visible for capture but keep off-screen
+      cardElement.style.display = 'block';
+
+      const canvas = await html2canvas(cardElement, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false
       });
 
-      canvas.toBlob(async (blob) => {
-        if (!blob) throw new Error("Image generation failed");
-        
-        const fileName = `Bill_${invoice.tenant.name.replace(/\s+/g, '_')}.png`;
-        const file = new File([blob], fileName, { type: 'image/png' });
+      // Hide again
+      cardElement.style.display = 'none';
 
-        // Native Sharing (Mobile - KakaoTalk etc)
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-            try {
-                await navigator.share({
-                    files: [file],
-                    title: `Invoice - ${invoice.tenant.name}`,
-                    text: `Here is the electricity invoice for ${invoice.tenant.name}.`
-                });
-                showToast("Opened Share Sheet!");
-            } catch (shareError) {
-                // User cancelled or failed
-                console.log('Share cancelled', shareError);
-            }
-        } else {
-            // Desktop Fallback
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileName;
-            a.click();
-            URL.revokeObjectURL(url);
-            showToast("Image Downloaded! Send this file manually.");
-        }
-      }, 'image/png');
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error("Image generation failed");
+
+      // Generate Link
+      const shareUrl = await generateShareUrl(invoice);
+
+      const fileName = `Bill_Card_${invoice.tenant.name}.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
+
+      // Copy Link to Clipboard automatically
+      await navigator.clipboard.writeText(shareUrl);
+      
+      // Native Share
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+         try {
+           await navigator.share({
+             files: [file],
+             title: 'Utility Bill Notification',
+             text: `Here is the bill for ${invoice.tenant.name}.\nLink: ${shareUrl}`
+           });
+           showToast("Opened Share Sheet!");
+         } catch(e) { console.log('Share cancelled'); }
+      } else {
+        // Desktop: Download Image + Alert about link
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        showToast("Card Saved! Link copied to clipboard.");
+      }
 
     } catch (error) {
-      console.error("Image share failed:", error);
-      showToast("Failed to create image");
+      console.error("Card gen failed", error);
+      showToast("Failed to create card");
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // 2. Share as Link (Data Only - Short URL)
-  const handleCopyLink = async (invoice: InvoiceData) => {
+  // Helper to generate the short link
+  const generateShareUrl = async (invoice: InvoiceData): Promise<string> => {
+     const payload = {
+        t: invoice.tenant.name, 
+        p: unitPrice,           
+        i: invoice.items.map(item => ({
+            n: item.meterName,
+            s: item.result.startReading.value,
+            sd: item.result.startReading.date,
+            e: item.result.endReading.value,
+            ed: item.result.endReading.date,
+            u: item.result.usage
+        }))
+    };
+    const encoded = encodeURIComponent(JSON.stringify(payload));
+    return `${window.location.origin}/?share=${encoded}`;
+  };
+
+  // 2. Copy Link Only
+  const handleCopyLink = async (e: React.MouseEvent, invoice: InvoiceData) => {
+      e.preventDefault();
+      e.stopPropagation();
       try {
-        // Construct payload WITHOUT images to keep URL short
-        const payload = {
-            t: invoice.tenant.name, 
-            p: unitPrice,           
-            i: invoice.items.map(item => ({
-                n: item.meterName,
-                s: item.result.startReading.value,
-                sd: item.result.startReading.date,
-                e: item.result.endReading.value,
-                ed: item.result.endReading.date,
-                u: item.result.usage
-                // No 'img' field here
-            }))
-        };
-
-        const jsonStr = JSON.stringify(payload);
-        const encoded = encodeURIComponent(jsonStr);
-        const shareUrl = `${window.location.origin}/?share=${encoded}`;
-        
+        const shareUrl = await generateShareUrl(invoice);
         const dateStr = new Date().toLocaleDateString();
-        const msg = `[전기요금 청구서]
-수신: ${invoice.tenant.name}
-금액: ₩${Math.floor(invoice.totalCost * 1.1).toLocaleString()}
-기간: ${dateStr}
-
-▼ 상세 내역 확인 (사진 별도)
-${shareUrl}`;
+        const msg = `[Electricity Bill]\nTo: ${invoice.tenant.name}\nAmount: ₩${Math.floor(invoice.totalCost * 1.1).toLocaleString()}\n\nLink:\n${shareUrl}`;
 
         await navigator.clipboard.writeText(msg);
-        showToast("Link Copied to Clipboard!");
-
+        showToast("Link Copied!");
       } catch (err) {
-          console.error('Failed to copy: ', err);
           showToast("Failed to copy link");
       }
   };
@@ -239,7 +246,7 @@ ${shareUrl}`;
   if (invoices.length === 0) return null;
 
   return (
-    <div className="space-y-12 print:space-y-0 print:block">
+    <div className="space-y-12 print:space-y-0 print:block relative">
       
       {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg(null)} />}
 
@@ -247,13 +254,14 @@ ${shareUrl}`;
       {isSharedView && (
           <div className="bg-blue-600 text-white p-6 rounded-xl shadow-lg mb-8 text-center animate-fade-in print:hidden">
               <h2 className="text-xl font-bold mb-2">Electricity Bill Details</h2>
-              <p className="opacity-90 mb-6 text-sm">Use the button below to save the official document.</p>
+              <p className="opacity-90 mb-6 text-sm">Please review your usage below.</p>
               <button 
+                type="button"
                 onClick={handleDownloadPDF}
                 className="bg-white text-blue-700 hover:bg-blue-50 px-6 py-3 rounded-full font-bold shadow-md inline-flex items-center gap-2 transform active:scale-95 transition-all"
               >
                   <Download className="w-5 h-5" />
-                  Download PDF
+                  Download Official PDF
               </button>
           </div>
       )}
@@ -263,16 +271,16 @@ ${shareUrl}`;
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center mb-8 print:hidden relative z-40">
             <div>
             <h2 className="font-bold text-gray-800">Generated Invoices ({invoices.length})</h2>
-            <p className="text-sm text-gray-500">Share as image card or copy link.</p>
+            <p className="text-sm text-gray-500">Send notification cards or download PDFs.</p>
             </div>
             <button 
+                type="button"
                 onClick={handleDownloadPDF}
                 disabled={isProcessing}
-                type="button"
                 className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors text-sm"
             >
                 {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                PDF
+                Download All PDF
             </button>
         </div>
       )}
@@ -284,29 +292,62 @@ ${shareUrl}`;
           className="bg-white shadow-2xl rounded-none md:rounded-lg overflow-hidden print:overflow-visible max-w-[210mm] mx-auto print:shadow-none print:w-full print:max-w-none print:break-after-page mb-16 relative group"
         >
           
+          {/* --- HIDDEN SUMMARY CARD TEMPLATE (For Image Generation) --- */}
+          <div 
+            id={`summary-card-template-${idx}`} 
+            className="fixed top-0 left-0 z-[-50] bg-white p-8 w-[400px] font-sans text-left hidden"
+            style={{ border: '1px solid #e5e7eb' }} // Explicit border for canvas
+          >
+             <div className="mb-6">
+                <p className="text-gray-500 text-sm mb-1">Hello,</p>
+                <h2 className="text-xl font-bold text-gray-900 mb-1">{invoice.tenant.name}</h2>
+                <p className="text-gray-600 text-sm">Your electricity bill for {new Date().toLocaleDateString()} is ready.</p>
+             </div>
+
+             <div className="bg-gray-50 rounded-xl p-6 mb-6 text-center border border-gray-100">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Total Amount Due</p>
+                <p className="text-3xl font-extrabold text-gray-900">₩ {Math.floor(invoice.totalCost * 1.1).toLocaleString()}</p>
+             </div>
+
+             {/* The Visual Button (Not clickable in image, but gives visual cue) */}
+             <div className="bg-[#6b46c1] text-white py-3.5 px-4 rounded-lg text-center font-bold text-sm shadow-sm mb-6 flex items-center justify-center gap-2">
+                <MousePointerClick className="w-4 h-4" /> View Bill Details
+             </div>
+
+             <div className="pt-4 border-t border-gray-100">
+                <p className="text-[10px] text-gray-400 leading-relaxed text-center">
+                  This is an automated notification.<br/>
+                  Please check the link provided with this card for details.
+                </p>
+             </div>
+          </div>
+          {/* -------------------------------------------------------- */}
+
           {/* Action Overlay (Hover) - Hidden in Shared View & Print */}
           {!isSharedView && (
             <div 
                 className="absolute top-4 right-4 flex gap-2 print:hidden opacity-0 group-hover:opacity-100 transition-opacity z-10"
                 data-html2canvas-ignore="true"
             >
-                {/* Primary: Share Image (Card) */}
+                {/* 1. Share Notification Card (Priority) */}
                 <button 
-                onClick={() => handleShareImage(invoice, idx)}
+                type="button"
+                onClick={(e) => handleShareSummaryCard(e, invoice, idx)}
                 disabled={isProcessing}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full shadow-lg cursor-pointer transform hover:scale-105 transition-all flex items-center gap-2 font-bold text-sm"
-                title="Send as Image Card (Best Quality)"
+                className="bg-[#6b46c1] hover:bg-[#553c9a] text-white px-4 py-2 rounded-full shadow-lg cursor-pointer transform hover:scale-105 transition-all flex items-center gap-2 font-bold text-sm"
+                title="Create Notification Card Image"
                 >
-                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
-                    Share Card
+                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <BellRing className="w-4 h-4" />}
+                    Create Card
                 </button>
 
-                 {/* Secondary: Copy Link */}
+                 {/* 2. Copy Link */}
                  <button 
-                onClick={() => handleCopyLink(invoice)}
+                type="button"
+                onClick={(e) => handleCopyLink(e, invoice)}
                 disabled={isProcessing}
                 className="bg-white hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-full shadow-md border border-gray-200 cursor-pointer transform hover:scale-105 transition-all flex items-center gap-2 font-medium text-sm"
-                title="Copy Data Link (No Photos)"
+                title="Copy Link Only"
                 >
                     <Link className="w-4 h-4" />
                     Link
@@ -435,6 +476,7 @@ ${shareUrl}`;
           data-html2canvas-ignore="true"
         >
           <button 
+            type="button"
             className="absolute top-6 right-6 p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer"
             onClick={() => setViewingImageUrl(null)}
           >
