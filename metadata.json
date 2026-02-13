@@ -1,0 +1,5 @@
+{
+  "name": "Meter Reading Analyzer",
+  "description": "Upload a screenshot of your utility data log to automatically extract start and end readings and calculate monthly usage using Gemini Vision AI.",
+  "requestFramePermissions": []
+}
