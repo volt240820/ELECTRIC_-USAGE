@@ -1,19 +1,26 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult, GeminiResponseSchema } from "../types";
 
-// Safety check for API Key retrieval to prevent crashes in environments where 'process' is undefined (e.g., standard browser builds without polyfills)
-const getApiKey = () => {
+// Helper function to safely retrieve API Key from various environment configurations
+const getApiKey = (): string => {
+  // 1. Try standard process.env (Node/Webpack/Vercel)
   try {
-    if (typeof process !== 'undefined' && process.env) {
+    if (typeof process !== 'undefined' && process.env?.API_KEY) {
       return process.env.API_KEY;
     }
-  } catch (e) {
-    // Ignore error
-  }
+  } catch (e) {}
+
+  // 2. Try Vite-specific import.meta.env (Fallback for standard Vite builds)
+  try {
+    // @ts-ignore
+    if (import.meta?.env?.VITE_API_KEY) {
+      // @ts-ignore
+      return import.meta.env.VITE_API_KEY;
+    }
+  } catch (e) {}
+
   return '';
 };
-
-const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: string; mimeType: string } }> => {
   return new Promise((resolve, reject) => {
@@ -43,6 +50,14 @@ const generateContentWithRetry = async (
   retries = 3, 
   initialDelay = 2000
 ) => {
+  // Lazy initialization of the client to prevent top-level crashes
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error("API Key is missing. Please check your settings (Vercel Environment Variables). Key must be named 'API_KEY' or 'VITE_API_KEY'.");
+  }
+  
+  const ai = new GoogleGenAI({ apiKey });
+
   let currentDelay = initialDelay;
   
   for (let i = 0; i <= retries; i++) {
@@ -82,38 +97,32 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
     You are an advanced AI data analyst specializing in OCR correction for utility logs.
     
     **TASK**: 
-    Analyze the provided utility data table image and extract the **Start Reading** and **End Reading**.
+    Analyze the provided utility data table image and extract the **Start Reading** and **End Reading** to calculate monthly usage.
     
-    **LOGIC**:
-    The user specifically requested: "Calculate usage by checking the difference between the 1st day reading and the Last Day 00:00 reading."
+    **SPECIFIC REQUIREMENT**:
+    The user wants to calculate usage based on:
+    1. **Start Reading**: The reading on the **1st day of the target month** (e.g., '2024-01-01') at **00:00**.
+    2. **End Reading**: The reading on the **Last day of the target month** (e.g., '2024-01-31') at **00:00** (or the closest available timestamp to the end of the month if 00:00 is missing).
     
-    1. **Start Reading**: Find the row for the **1st day of the month** (e.g., '01', 'DD-01') at **00:00**.
-    2. **End Reading**: Find the row for the **Last day of the month** (e.g., 30th or 31st) at **00:00**.
-       - *Note*: If the log doesn't have the last day at 00:00, look for the reading closest to the end of the month.
-       - *Priority*: 1st Day 00:00 vs Last Day 00:00.
-    3. **Usage Calculation**: Absolute difference between End Value and Start Value. (|End - Start|).
-
     **STRATEGY**:
-    1. **Scan All Rows**: Identify all date/value pairs.
-    2. **Select Start Row**: Look for 'DD-01' (1st of month). If not found, take the earliest timestamp.
-    3. **Select End Row**: 
-       - Look for the row with date 30 or 31 (or 28/29 for Feb) at time 00:00.
-       - If not found, look for the highlighted row or the last recorded entry.
+    1. **Scan All Rows**: Identify the date column and value column.
+    2. **Find Start**: Look for row matching "Day 01" at "00:00".
+    3. **Find End**: Look for row matching the last day (28, 29, 30, or 31) at "00:00". 
+       - If "Last Day 00:00" is missing, try finding "Next Month 1st 00:00" as it is equivalent.
+       - If neither exists, take the very last recorded entry in the table.
+    4. **Calculate Usage**: |End Value - Start Value|.
 
-    **OCR CORRECTION (CRITICAL)**:
-    - The images often have low resolution or compression artifacts.
-    - **7 vs 4**: A '7' often looks like a '4' if the top bar is blurry. Look at the angle.
-    - **8 vs 6/9**: Verify loops.
-    - **Context Check**: Compare the Start Value and End Value. The numbers should look consistent in magnitude.
-    - **Specific Case**: If you see '694957.7' but the pixels might be '697948.7', re-examine the 3rd digit carefully. Trust the visual shape over assumptions.
+    **OCR CORRECTION TIPS**:
+    - **7 vs 4**: A '7' often looks like a '4' in low res. Check the top bar angle.
+    - **8 vs 6/9**: Check for closed loops.
+    - **Decimals**: Look carefully for dots or commas. "12345.6"
+    - **Consistency**: The End Value should be >= Start Value (usually). If End < Start, check if the meter rolled over or if OCR misread a digit.
 
-    **DATA FORMAT**:
-    - Value: "684955,8" (comma) should be read as number 684955.8.
+    **OUTPUT FORMAT**:
+    Return JSON only.
   `;
 
   try {
-    // Upgrading to gemini-3-flash-preview for better OCR reasoning and context understanding
-    // Using the retry wrapper
     const response = await generateContentWithRetry(
       'gemini-3-flash-preview', 
       {
@@ -165,20 +174,26 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
     const startVal = Number(data.startReading.value);
     const endVal = Number(data.endReading.value);
 
-    const usage = Math.abs(endVal - startVal);
+    // Calculate usage, handling potential floating point errors
+    const usage = parseFloat(Math.abs(endVal - startVal).toFixed(2));
 
     return {
       startReading: { ...data.startReading, value: startVal },
       endReading: { ...data.endReading, value: endVal },
-      usage: parseFloat(usage.toFixed(2))
+      usage: usage
     };
 
   } catch (error: any) {
     console.error("Error analyzing image:", error);
-    // Provide a more user-friendly error message if it's still a quota issue after retries
+    
+    // User-friendly error mapping
+    if (error.message?.includes('API Key is missing')) {
+      throw new Error("System Error: API Key is not configured. Please verify Vercel Environment Variables.");
+    }
     if (error.message?.includes('429') || error.message?.includes('quota')) {
        throw new Error("Server is busy (Quota Exceeded). Please wait a moment and try again.");
     }
-    throw new Error("Failed to analyze the image. Please try a clearer image or manually edit the results.");
+    
+    throw new Error(error.message || "Failed to analyze the image.");
   }
 };
