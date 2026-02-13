@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Tenant, AnalysisResult } from '../types';
-import { FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff, Share2, Copy, Check, ImageIcon, BellRing, MousePointerClick } from 'lucide-react';
+import { FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff, Share2, Copy, Check, ImageIcon, BellRing, MousePointerClick, ClipboardCopy, MessageSquare } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -37,6 +37,100 @@ const Toast: React.FC<{ message: string; onClose: () => void }> = ({ message, on
         <Check className="w-3 h-3 text-white" />
       </div>
       <span className="text-sm font-medium whitespace-nowrap">{message}</span>
+    </div>
+  );
+};
+
+// Preview Modal for Desktop Sharing
+const SharePreviewModal: React.FC<{ 
+  isOpen: boolean; 
+  onClose: () => void; 
+  imageBlob: Blob | null; 
+  shareText: string;
+  showToast: (msg: string) => void;
+}> = ({ isOpen, onClose, imageBlob, shareText, showToast }) => {
+  const [imgUrl, setImgUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (imageBlob) {
+      const url = URL.createObjectURL(imageBlob);
+      setImgUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+  }, [imageBlob]);
+
+  if (!isOpen || !imageBlob) return null;
+
+  const handleCopyImage = async () => {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          [imageBlob.type]: imageBlob
+        })
+      ]);
+      showToast("📸 Image Copied! Paste it (Ctrl+V) in chat.");
+    } catch (e) {
+      console.error(e);
+      showToast("❌ Browser blocked image copy. Right-click image to copy.");
+    }
+  };
+
+  const handleCopyText = async () => {
+    try {
+      await navigator.clipboard.writeText(shareText);
+      showToast("📝 Text & Link Copied!");
+    } catch (e) {
+      showToast("❌ Failed to copy text.");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
+      <div 
+        className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col max-h-[90vh]" 
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+          <h3 className="font-bold text-gray-800 flex items-center gap-2">
+            <Share2 className="w-5 h-5 text-blue-600" /> Share Preview
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition-colors">
+            <X className="w-5 h-5 text-gray-500" />
+          </button>
+        </div>
+        
+        <div className="p-6 overflow-y-auto flex flex-col items-center gap-6 bg-gray-100">
+           {/* Image Preview */}
+           <div className="relative shadow-lg rounded-lg overflow-hidden group">
+             <img src={imgUrl} alt="Card Preview" className="max-w-full w-auto max-h-[400px] object-contain bg-white" />
+             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <span className="text-white font-medium text-sm bg-black/50 px-3 py-1 rounded-full">Preview Only</span>
+             </div>
+           </div>
+
+           <div className="w-full space-y-3">
+             <div className="bg-blue-50 p-3 rounded-lg text-xs text-blue-800 border border-blue-100 mb-2">
+               <strong>Tip:</strong> Send the image first, then the text link.
+             </div>
+
+             <button 
+                onClick={handleCopyImage}
+                className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-50 border border-gray-300 text-gray-800 font-bold py-3 rounded-xl transition-all active:scale-95 shadow-sm"
+             >
+                <ImageIcon className="w-5 h-5 text-purple-600" />
+                1. Copy Image
+             </button>
+
+             <button 
+                onClick={handleCopyText}
+                className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95 shadow-md"
+             >
+                <MessageSquare className="w-5 h-5" />
+                2. Copy Message & Link
+             </button>
+           </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -103,6 +197,13 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
   const [isProcessing, setIsProcessing] = useState(false);
   const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  
+  // Share Modal State
+  const [shareModal, setShareModal] = useState<{ isOpen: boolean; blob: Blob | null; text: string }>({
+    isOpen: false,
+    blob: null,
+    text: ''
+  });
 
   const showToast = (msg: string) => setToastMsg(msg);
 
@@ -170,35 +271,31 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
       if (!blob) throw new Error("Image generation failed");
 
-      // Generate Link
+      // Generate Link & Text
       const shareUrl = await generateShareUrl(invoice);
+      const dateStr = new Date().toLocaleDateString();
+      const shareText = `[Electricity Bill]\nTo: ${invoice.tenant.name}\nDate: ${dateStr}\n\n▼ Check Details & Download PDF:\n${shareUrl}`;
 
       const fileName = `Bill_Card_${invoice.tenant.name}.png`;
       const file = new File([blob], fileName, { type: 'image/png' });
 
-      // Copy Link to Clipboard automatically
-      await navigator.clipboard.writeText(shareUrl);
-      
-      // Native Share
+      // Native Share (Mobile) - Works great
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
          try {
            await navigator.share({
              files: [file],
              title: 'Utility Bill Notification',
-             text: `Here is the bill for ${invoice.tenant.name}.\nLink: ${shareUrl}`
+             text: shareText
            });
            showToast("Opened Share Sheet!");
          } catch(e) { console.log('Share cancelled'); }
       } else {
-        // Desktop: Download Image + Alert about link
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        showToast("Card Saved! Link copied to clipboard.");
+        // Desktop - Open Preview Modal instead of downloading
+        setShareModal({
+            isOpen: true,
+            blob: blob,
+            text: shareText
+        });
       }
 
     } catch (error) {
@@ -249,6 +346,14 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
     <div className="space-y-12 print:space-y-0 print:block relative">
       
       {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg(null)} />}
+
+      <SharePreviewModal 
+        isOpen={shareModal.isOpen}
+        onClose={() => setShareModal(prev => ({ ...prev, isOpen: false }))}
+        imageBlob={shareModal.blob}
+        shareText={shareModal.text}
+        showToast={showToast}
+      />
 
       {/* SHARED VIEW: Tenant Banner */}
       {isSharedView && (
