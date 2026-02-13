@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ImageUploader } from './components/ImageUploader';
 import { AnalysisResults } from './components/AnalysisResults';
 import { Invoice } from './components/Invoice';
@@ -14,6 +14,7 @@ interface AnalysisItem {
   error?: string;
   // Assignment data
   assignment: MeterAssignment;
+  isShared?: boolean; // Flag to indicate if this item came from a shared link
 }
 
 const DEFAULT_TENANTS: Tenant[] = [
@@ -33,6 +34,60 @@ const App: React.FC = () => {
   const [items, setItems] = useState<AnalysisItem[]>([]);
   const [isAnalyzingAll, setIsAnalyzingAll] = useState(false);
   const [activeTab, setActiveTab] = useState<'analysis' | 'invoice'>('analysis');
+  const [isSharedView, setIsSharedView] = useState(false);
+
+  // Check for shared data in URL on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shareData = params.get('share');
+
+    if (shareData) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(shareData));
+        // Structure: { t: tenantName, p: unitPrice, i: [ { n: name, s: startVal, e: endVal, u: usage, sd: startDate, ed: endDate } ] }
+        
+        const sharedTenantId = 'shared-tenant';
+        
+        // 1. Set Unit Price
+        if (decoded.p) setUnitPrice(Number(decoded.p));
+
+        // 2. Setup Tenant
+        const sharedTenant: Tenant = {
+          id: sharedTenantId,
+          name: decoded.t || 'Shared Invoice',
+          meters: decoded.i.map((item: any) => item.n)
+        };
+        setTenants([sharedTenant]);
+
+        // 3. Reconstruct Items
+        const reconstructedItems: AnalysisItem[] = decoded.i.map((item: any, idx: number) => ({
+          id: `shared-${idx}`,
+          file: new File([""], "Image_Not_Available_In_Share_Mode", { type: "text/plain" }), // Dummy file
+          status: 'success',
+          isShared: true,
+          assignment: {
+            tenantId: sharedTenantId,
+            meterName: item.n
+          },
+          result: {
+            startReading: { value: item.s, date: item.sd },
+            endReading: { value: item.e, date: item.ed },
+            usage: item.u
+          }
+        }));
+
+        setItems(reconstructedItems);
+        setIsSharedView(true);
+        setActiveTab('invoice');
+        
+        // Remove query param from URL so refresh doesn't stick (optional, but good for UX if they want to upload new stuff)
+        // window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (e) {
+        console.error("Failed to parse shared data", e);
+        alert("Invalid shared link.");
+      }
+    }
+  }, []);
 
   const handleImagesSelect = (files: File[]) => {
     const newItems: AnalysisItem[] = files.map(file => ({
@@ -131,7 +186,8 @@ const App: React.FC = () => {
         meterName: item.assignment.meterName,
         result: item.result!,
         file: item.file,
-        cost: Math.floor(item.result!.usage * unitPrice)
+        cost: Math.floor(item.result!.usage * unitPrice),
+        isShared: item.isShared
       }));
 
       const totalUsage = itemsWithCost.reduce((acc, curr) => acc + curr.result.usage, 0);
@@ -159,31 +215,48 @@ const App: React.FC = () => {
                <Activity className="w-6 h-6 text-white" />
              </div>
              <h1 className="text-xl font-bold text-gray-800">Meter Bill Manager</h1>
+             {isSharedView && (
+               <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full font-bold border border-yellow-200">Shared View Mode</span>
+             )}
           </div>
 
           <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
-                <span className="text-sm font-semibold text-gray-500">Unit Price (₩/kWh):</span>
-                <input 
-                  type="number" 
-                  value={unitPrice}
-                  onChange={(e) => setUnitPrice(Number(e.target.value))}
-                  className="w-20 bg-transparent font-bold text-gray-800 focus:outline-none text-right"
-                />
-             </div>
-             
-             <button 
-               onClick={() => setShowConfig(!showConfig)}
-               className={`p-2 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium ${showConfig ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'}`}
-             >
-               <Settings className="w-5 h-5" />
-               Settings
-             </button>
+             {!isSharedView && (
+               <>
+                <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+                    <span className="text-sm font-semibold text-gray-500">Unit Price (₩/kWh):</span>
+                    <input 
+                      type="number" 
+                      value={unitPrice}
+                      onChange={(e) => setUnitPrice(Number(e.target.value))}
+                      className="w-20 bg-transparent font-bold text-gray-800 focus:outline-none text-right"
+                    />
+                </div>
+                
+                <button 
+                  onClick={() => setShowConfig(!showConfig)}
+                  className={`p-2 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium ${showConfig ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50'}`}
+                >
+                  <Settings className="w-5 h-5" />
+                  Settings
+                </button>
+               </>
+             )}
+             {isSharedView && (
+               <button 
+                 onClick={() => {
+                   window.location.href = window.location.origin;
+                 }}
+                 className="text-sm text-blue-600 hover:underline"
+               >
+                 Create New Bill
+               </button>
+             )}
           </div>
         </div>
 
         {/* Tenant Config Panel */}
-        {showConfig && (
+        {showConfig && !isSharedView && (
           <div className="mt-4 bg-white rounded-xl shadow-lg border border-gray-200 p-6 animate-slide-down">
             <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 border-b pb-2">
               <Users className="w-5 h-5 text-blue-600" /> Manage Companies & Meters
@@ -285,25 +358,27 @@ const App: React.FC = () => {
 
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 print:max-w-none print:px-0">
         
-        {/* Tabs */}
-        <div className="flex justify-center mb-8 print:hidden">
-           <div className="bg-white p-1 rounded-xl shadow-sm inline-flex border border-gray-200">
-              <button 
-                onClick={() => setActiveTab('analysis')}
-                className={`px-6 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'analysis' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-800'}`}
-              >
-                1. Upload & Assign
-              </button>
-              <div className="w-px bg-gray-200 my-2 mx-1"></div>
-              <button 
-                onClick={() => setActiveTab('invoice')}
-                className={`px-6 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'invoice' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-800'}`}
-              >
-                2. View Invoices
-                {hasResults && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{invoiceData.length}</span>}
-              </button>
-           </div>
-        </div>
+        {/* Tabs - Hidden in Shared View */}
+        {!isSharedView && (
+          <div className="flex justify-center mb-8 print:hidden">
+            <div className="bg-white p-1 rounded-xl shadow-sm inline-flex border border-gray-200">
+                <button 
+                  onClick={() => setActiveTab('analysis')}
+                  className={`px-6 py-2 rounded-lg text-sm font-semibold transition-all ${activeTab === 'analysis' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-800'}`}
+                >
+                  1. Upload & Assign
+                </button>
+                <div className="w-px bg-gray-200 my-2 mx-1"></div>
+                <button 
+                  onClick={() => setActiveTab('invoice')}
+                  className={`px-6 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'invoice' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-800'}`}
+                >
+                  2. View Invoices
+                  {hasResults && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{invoiceData.length}</span>}
+                </button>
+            </div>
+          </div>
+        )}
 
         {/* Analysis View */}
         {activeTab === 'analysis' && (
@@ -433,7 +508,7 @@ const App: React.FC = () => {
                  </button>
                </div>
              ) : (
-                <Invoice invoices={invoiceData} unitPrice={unitPrice} />
+                <Invoice invoices={invoiceData} unitPrice={unitPrice} isSharedView={isSharedView} />
              )}
            </div>
         )}

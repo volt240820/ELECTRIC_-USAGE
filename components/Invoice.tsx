@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Tenant, AnalysisResult } from '../types';
-import { Printer, Mail, FileImage, Download, Loader2, ZoomIn, X, Link } from 'lucide-react';
+import { Printer, Mail, FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -11,6 +11,7 @@ interface InvoiceData {
     result: AnalysisResult;
     file: File;
     cost: number;
+    isShared?: boolean;
   }[];
   totalUsage: number;
   totalCost: number;
@@ -19,6 +20,7 @@ interface InvoiceData {
 interface InvoiceProps {
   invoices: InvoiceData[];
   unitPrice: number;
+  isSharedView?: boolean;
 }
 
 // Updated props to include onImageClick handler
@@ -26,10 +28,13 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
   const [preview, setPreview] = useState<string>('');
 
   useEffect(() => {
-    const url = URL.createObjectURL(item.file);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [item.file]);
+    // Only create object URL if it's not a shared/dummy file
+    if (!item.isShared) {
+        const url = URL.createObjectURL(item.file);
+        setPreview(url);
+        return () => URL.revokeObjectURL(url);
+    }
+  }, [item.file, item.isShared]);
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 break-inside-avoid shadow-sm print:shadow-none print:border print:border-gray-300 print:mb-4">
@@ -47,24 +52,34 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
           <div className="font-mono text-sm font-semibold text-blue-600">{item.result.endReading.value}</div>
           <div className="text-[10px] text-gray-400">{item.result.endReading.date.split(' ')[0]}</div>
         </div>
-        <div className="col-span-2 relative group cursor-pointer" onClick={() => onImageClick(preview)}>
-           <img 
-             src={preview} 
-             alt="Meter Proof" 
-             className="w-full h-40 object-contain bg-black/5 rounded border border-gray-200 transition-transform group-hover:brightness-90" 
-           />
-           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-             <div className="bg-black/50 text-white p-2 rounded-full backdrop-blur-sm">
-               <ZoomIn className="w-5 h-5" />
-             </div>
-           </div>
+        
+        <div className="col-span-2 relative group cursor-pointer" onClick={() => !item.isShared && preview && onImageClick(preview)}>
+           {item.isShared ? (
+               <div className="w-full h-40 bg-gray-50 rounded border border-gray-200 border-dashed flex flex-col items-center justify-center text-gray-400 p-4 text-center">
+                   <ImageOff className="w-8 h-8 mb-2 opacity-50" />
+                   <p className="text-[10px] leading-tight">Image not available in shared link</p>
+               </div>
+           ) : (
+               <>
+                <img 
+                    src={preview} 
+                    alt="Meter Proof" 
+                    className="w-full h-40 object-contain bg-black/5 rounded border border-gray-200 transition-transform group-hover:brightness-90" 
+                />
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="bg-black/50 text-white p-2 rounded-full backdrop-blur-sm">
+                        <ZoomIn className="w-5 h-5" />
+                    </div>
+                </div>
+               </>
+           )}
         </div>
       </div>
     </div>
   );
 };
 
-export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice }) => {
+export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedView }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null);
 
@@ -112,17 +127,37 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice }) => {
 
   const handleEmail = (invoice: InvoiceData) => {
     const subject = `Electricity Invoice - ${invoice.tenant.name}`;
-    const pageUrl = window.location.href;
-    const body = `Dear ${invoice.tenant.name},\n\nPlease find the attached invoice details:\n\nTotal Usage: ${invoice.totalUsage.toLocaleString()} kWh\nTotal Due: ₩ ${Math.floor(invoice.totalCost * 1.1).toLocaleString()}\n\nView Details & High-Res Images: ${pageUrl}\n\nNote: Attach the downloaded PDF to this email.`;
+    const pageUrl = window.location.href; // Note: This might be the raw URL if in shared view, or needs to be generated if not.
+    // If in shared view, the URL is already good. If not, the email recipient won't see data unless we generate a link.
+    // For simplicity in this version, we assume user shares via Copy Link for now, or attaches PDF.
+    const body = `Dear ${invoice.tenant.name},\n\nPlease find the attached invoice details:\n\nTotal Usage: ${invoice.totalUsage.toLocaleString()} kWh\nTotal Due: ₩ ${Math.floor(invoice.totalCost * 1.1).toLocaleString()}\n\nNote: Attach the downloaded PDF to this email.`;
     window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
   const handleCopyLink = (invoice: InvoiceData) => {
-      const pageUrl = window.location.href;
-      const text = `[Electricity Invoice]\nCustomer: ${invoice.tenant.name}\nTotal Due: ₩ ${Math.floor(invoice.totalCost * 1.1).toLocaleString()}\n\nView Details: ${pageUrl}`;
+      // 1. Construct payload
+      const payload = {
+          t: invoice.tenant.name, // Tenant Name
+          p: unitPrice,           // Price
+          i: invoice.items.map(item => ({
+              n: item.meterName,
+              s: item.result.startReading.value,
+              sd: item.result.startReading.date,
+              e: item.result.endReading.value,
+              ed: item.result.endReading.date,
+              u: item.result.usage
+          }))
+      };
+
+      // 2. Encode to JSON string -> URI Component
+      const jsonStr = JSON.stringify(payload);
+      const encoded = encodeURIComponent(jsonStr);
       
-      navigator.clipboard.writeText(text).then(() => {
-          alert('Link and summary copied to clipboard! Paste it into KakaoTalk.');
+      // 3. Construct full URL
+      const shareUrl = `${window.location.origin}/?share=${encoded}`;
+      
+      navigator.clipboard.writeText(shareUrl).then(() => {
+          alert('Shared link copied to clipboard! \n\nNote: Images are not included in the shared link.');
       }).catch(err => {
           console.error('Failed to copy: ', err);
       });
