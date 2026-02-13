@@ -20,6 +20,49 @@ const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: s
   });
 };
 
+// Helper function for delay
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Wrapper to handle quota limits with retry logic
+const generateContentWithRetry = async (
+  model: string, 
+  contents: any, 
+  config: any, 
+  retries = 3, 
+  initialDelay = 2000
+) => {
+  let currentDelay = initialDelay;
+  
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents,
+        config
+      });
+      return response;
+    } catch (error: any) {
+      // Check if it's a quota or rate limit error
+      const errorMessage = error.message?.toLowerCase() || '';
+      const isQuotaError = errorMessage.includes('429') || 
+                           errorMessage.includes('quota') || 
+                           errorMessage.includes('exhausted') ||
+                           errorMessage.includes('too many requests');
+
+      if (isQuotaError && i < retries) {
+        console.warn(`API Quota hit. Retrying in ${currentDelay}ms... (Attempt ${i + 1}/${retries})`);
+        await wait(currentDelay);
+        currentDelay *= 2; // Exponential backoff (2s -> 4s -> 8s)
+        continue;
+      }
+      
+      // If it's not a quota error or we ran out of retries, throw the error
+      throw error;
+    }
+  }
+  throw new Error("Failed to connect to AI service after multiple attempts.");
+};
+
 export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => {
   const imagePart = await fileToGenerativePart(file);
 
@@ -58,15 +101,16 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
 
   try {
     // Upgrading to gemini-3-flash-preview for better OCR reasoning and context understanding
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview', 
-      contents: {
+    // Using the retry wrapper
+    const response = await generateContentWithRetry(
+      'gemini-3-flash-preview', 
+      {
         parts: [
           imagePart,
           { text: prompt }
         ]
       },
-      config: {
+      {
         responseMimeType: 'application/json',
         responseSchema: {
           type: Type.OBJECT,
@@ -91,7 +135,7 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
           required: ['startReading', 'endReading'],
         }
       }
-    });
+    );
 
     const text = response.text;
     if (!text) {
@@ -117,8 +161,12 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
       usage: parseFloat(usage.toFixed(2))
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error analyzing image:", error);
+    // Provide a more user-friendly error message if it's still a quota issue after retries
+    if (error.message?.includes('429') || error.message?.includes('quota')) {
+       throw new Error("Server is busy (Quota Exceeded). Please wait a moment and try again.");
+    }
     throw new Error("Failed to analyze the image. Please try a clearer image or manually edit the results.");
   }
 };
