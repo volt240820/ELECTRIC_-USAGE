@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Tenant, AnalysisResult } from '../types';
-import { Printer, Mail, FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff } from 'lucide-react';
+import { Printer, Mail, FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff, Share2 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -81,6 +81,7 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
 
 export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedView }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isSharingImage, setIsSharingImage] = useState(false);
   const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null);
 
   const handleDownloadPDF = async () => {
@@ -125,11 +126,61 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
     }
   };
 
+  const handleShareImage = async (invoice: InvoiceData, index: number) => {
+    setIsSharingImage(true);
+    try {
+      const element = document.getElementById(`invoice-card-${index}`);
+      if (!element) return;
+
+      // 1. Convert specific invoice to Image
+      const canvas = await html2canvas(element, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff'
+      });
+
+      // 2. Convert Canvas to Blob
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+            throw new Error("Failed to generate image");
+        }
+        
+        const fileName = `Invoice_${invoice.tenant.name.replace(/\s+/g, '_')}.png`;
+        const file = new File([blob], fileName, { type: 'image/png' });
+
+        // 3. Try Native Sharing (Mobile/KakaoTalk)
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+                await navigator.share({
+                    files: [file],
+                    title: `Utility Invoice - ${invoice.tenant.name}`,
+                    text: `Please check the attached utility invoice for ${invoice.tenant.name}.`
+                });
+            } catch (shareError) {
+                console.log('Share cancelled or failed', shareError);
+            }
+        } else {
+            // 4. Fallback: Download Image (Desktop)
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.click();
+            URL.revokeObjectURL(url);
+            alert("Image downloaded! You can now send this file via KakaoTalk.");
+        }
+      }, 'image/png');
+
+    } catch (error) {
+      console.error("Image sharing failed:", error);
+      alert("Failed to create image.");
+    } finally {
+      setIsSharingImage(false);
+    }
+  };
+
   const handleEmail = (invoice: InvoiceData) => {
     const subject = `Electricity Invoice - ${invoice.tenant.name}`;
-    const pageUrl = window.location.href; // Note: This might be the raw URL if in shared view, or needs to be generated if not.
-    // If in shared view, the URL is already good. If not, the email recipient won't see data unless we generate a link.
-    // For simplicity in this version, we assume user shares via Copy Link for now, or attaches PDF.
     const body = `Dear ${invoice.tenant.name},\n\nPlease find the attached invoice details:\n\nTotal Usage: ${invoice.totalUsage.toLocaleString()} kWh\nTotal Due: ₩ ${Math.floor(invoice.totalCost * 1.1).toLocaleString()}\n\nNote: Attach the downloaded PDF to this email.`;
     window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
@@ -157,7 +208,7 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
       const shareUrl = `${window.location.origin}/?share=${encoded}`;
       
       navigator.clipboard.writeText(shareUrl).then(() => {
-          alert('Shared link copied to clipboard! \n\nNote: Images are not included in the shared link.');
+          alert('Link copied! \n\n⚠️ IMPORTANT: Photos are NOT included in this link due to size limits.\n\nTo share photos, please use the "Share Image" button instead.');
       }).catch(err => {
           console.error('Failed to copy: ', err);
       });
@@ -171,25 +222,16 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center mb-8 print:hidden relative z-40">
          <div>
            <h2 className="font-bold text-gray-800">Generated Invoices ({invoices.length})</h2>
-           <p className="text-sm text-gray-500">Review, email, or save as PDF below.</p>
+           <p className="text-sm text-gray-500">Share as Image for KakaoTalk proof.</p>
          </div>
          <button 
             onClick={handleDownloadPDF}
             disabled={isGeneratingPdf}
             type="button"
-            className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-400 text-white px-5 py-2.5 rounded-lg shadow flex items-center gap-2 font-semibold transition-colors cursor-pointer select-none"
+            className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors text-sm"
          >
-            {isGeneratingPdf ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Generating PDF...
-              </>
-            ) : (
-              <>
-                <Download className="w-4 h-4" />
-                Download PDF
-              </>
-            )}
+            {isGeneratingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            PDF
          </button>
       </div>
 
@@ -206,21 +248,21 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
             className="absolute top-4 right-4 flex gap-2 print:hidden opacity-0 group-hover:opacity-100 transition-opacity z-10"
             data-html2canvas-ignore="true"
           >
+            <button 
+              onClick={() => handleShareImage(invoice, idx)}
+              type="button"
+              className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg cursor-pointer transform hover:scale-110 transition-all"
+              title="Share Image (KakaoTalk)"
+            >
+              {isSharingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Share2 className="w-5 h-5" />}
+            </button>
              <button 
               onClick={() => handleCopyLink(invoice)}
               type="button"
               className="bg-white hover:bg-gray-100 text-gray-700 p-2 rounded-full shadow-sm cursor-pointer border border-gray-200"
-              title="Copy Link to Clipboard (for KakaoTalk)"
+              title="Copy Data Link (No Photos)"
             >
               <Link className="w-5 h-5" />
-            </button>
-            <button 
-              onClick={() => handleEmail(invoice)}
-              type="button"
-              className="bg-white hover:bg-gray-100 text-gray-700 p-2 rounded-full shadow-sm cursor-pointer border border-gray-200"
-              title="Send via Email"
-            >
-              <Mail className="w-5 h-5" />
             </button>
           </div>
 
@@ -336,20 +378,22 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
         </div>
       ))}
 
-      {/* Floating Action Button (Backup) */}
+      {/* Floating Action Button (Primary) */}
       <div 
         className="fixed bottom-8 right-8 print:hidden flex flex-col gap-2 z-50"
         data-html2canvas-ignore="true"
       >
-        <button 
-          onClick={handleDownloadPDF}
-          disabled={isGeneratingPdf}
-          type="button"
-          className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-400 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 transition-transform hover:scale-105 font-bold cursor-pointer select-none"
-        >
-          {isGeneratingPdf ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-          Download PDF
-        </button>
+        {invoices.length === 1 && (
+            <button 
+            onClick={() => handleShareImage(invoices[0], 0)}
+            disabled={isSharingImage}
+            type="button"
+            className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:bg-blue-400 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-2 transition-transform hover:scale-105 font-bold cursor-pointer select-none"
+            >
+            {isSharingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Share2 className="w-5 h-5" />}
+            Share Image (KakaoTalk)
+            </button>
+        )}
       </div>
 
       {/* Image Viewer Modal */}

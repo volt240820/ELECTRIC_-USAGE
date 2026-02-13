@@ -104,7 +104,7 @@ const generateContentWithRetry = async (
       return response;
     } catch (error: any) {
       // Check if it's a quota or rate limit error
-      const errorMessage = error.message?.toLowerCase() || '';
+      const errorMessage = JSON.stringify(error).toLowerCase();
       const isQuotaError = errorMessage.includes('429') || 
                            errorMessage.includes('quota') || 
                            errorMessage.includes('exhausted') ||
@@ -149,9 +149,9 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
   `;
 
   try {
-    // Switch to gemini-2.5-flash-latest for maximum speed on vision tasks
+    // Switch to stable 'gemini-3-flash-preview' to avoid 404 errors with experimental names
     const response = await generateContentWithRetry(
-      'gemini-2.5-flash-latest', 
+      'gemini-3-flash-preview', 
       {
         parts: [
           imagePart,
@@ -213,14 +213,41 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
   } catch (error: any) {
     console.error("Error analyzing image:", error);
     
+    // Improved Error Parsing
+    let errorMessage = error.message || "Failed to analyze the image.";
+
+    // Attempt to extract message from JSON string error (e.g. {"error": ...})
+    if (typeof errorMessage === 'string' && (errorMessage.startsWith('{') || errorMessage.includes('{"error"'))) {
+        try {
+            // Sometimes the error message is wrapped in text, try to find the JSON part
+            const jsonMatch = errorMessage.match(/\{.*\}/);
+            const jsonString = jsonMatch ? jsonMatch[0] : errorMessage;
+            const parsed = JSON.parse(jsonString);
+            
+            if (parsed.error?.message) {
+                errorMessage = parsed.error.message;
+            } else if (parsed.message) {
+                errorMessage = parsed.message;
+            }
+        } catch(e) {
+            // If parsing fails, use the original message
+        }
+    }
+
     // User-friendly error mapping
-    if (error.message?.includes('API Key is missing')) {
+    const lowerMsg = errorMessage.toLowerCase();
+
+    if (lowerMsg.includes('api key is missing')) {
       throw new Error("Setup Error: Key not found. Please rename your Vercel Environment Variable to 'VITE_API_KEY' and Redeploy.");
     }
-    if (error.message?.includes('429') || error.message?.includes('quota')) {
-       throw new Error("Server is busy. Please try again in a few seconds.");
+    if (lowerMsg.includes('429') || lowerMsg.includes('quota') || lowerMsg.includes('exhausted')) {
+       throw new Error("Server is busy (Quota Limit). Please try again in 1 minute.");
+    }
+    if (lowerMsg.includes('404') || lowerMsg.includes('not found')) {
+        throw new Error("AI Model unavailable. Please contact support or try again later.");
     }
     
-    throw new Error(error.message || "Failed to analyze the image.");
+    // Return the cleaned up error message
+    throw new Error(errorMessage);
   }
 };
