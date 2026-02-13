@@ -3,14 +3,7 @@ import { AnalysisResult, GeminiResponseSchema } from "../types";
 
 // Helper function to safely retrieve API Key from various environment configurations
 const getApiKey = (): string => {
-  // 1. Try standard process.env (Node/Webpack/Vercel)
-  try {
-    if (typeof process !== 'undefined' && process.env?.API_KEY) {
-      return process.env.API_KEY;
-    }
-  } catch (e) {}
-
-  // 2. Try Vite-specific import.meta.env (Fallback for standard Vite builds)
+  // 1. Try Vite-specific import.meta.env (Primary for Vite apps)
   try {
     // @ts-ignore
     if (import.meta?.env?.VITE_API_KEY) {
@@ -19,23 +12,64 @@ const getApiKey = (): string => {
     }
   } catch (e) {}
 
+  // 2. Try standard process.env (Fallback)
+  try {
+    if (typeof process !== 'undefined' && process.env?.API_KEY) {
+      return process.env.API_KEY;
+    }
+  } catch (e) {}
+
   return '';
 };
 
-const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: string; mimeType: string } }> => {
+// Optimization: Compress and Resize Image before sending to API
+// Reduces payload size from ~5MB (PNG) to ~150KB (JPG), speeding up transfer and inference significantly.
+const compressImage = async (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = (reader.result as string).split(',')[1];
-      resolve({
-        inlineData: {
-          data: base64String,
-          mimeType: file.type,
-        },
-      });
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.src = url;
+    
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      
+      // Limit max dimension to 1024px. 
+      // This is sufficient for OCR but vastly faster than full 4K screenshots.
+      const MAX_SIZE = 1024;
+      if (width > height && width > MAX_SIZE) {
+        height = Math.round((height * MAX_SIZE) / width);
+        width = MAX_SIZE;
+      } else if (height > width && height > MAX_SIZE) {
+        width = Math.round((width * MAX_SIZE) / height);
+        height = MAX_SIZE;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        reject(new Error("Canvas context failed"));
+        return;
+      }
+      
+      // White background (handles transparent PNGs)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Convert to JPEG with 0.7 quality (Good balance for OCR speed/accuracy)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      URL.revokeObjectURL(url);
+      resolve(dataUrl.split(',')[1]); // Return base64 string only
     };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+    
+    img.onerror = (err) => {
+      URL.revokeObjectURL(url);
+      reject(err);
+    };
   });
 };
 
@@ -53,7 +87,7 @@ const generateContentWithRetry = async (
   // Lazy initialization of the client to prevent top-level crashes
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error("API Key is missing. Please check your settings (Vercel Environment Variables). Key must be named 'API_KEY' or 'VITE_API_KEY'.");
+    throw new Error("API Key is missing");
   }
   
   const ai = new GoogleGenAI({ apiKey });
@@ -91,40 +125,33 @@ const generateContentWithRetry = async (
 };
 
 export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => {
-  const imagePart = await fileToGenerativePart(file);
+  // Use compressed image for speed
+  const base64Data = await compressImage(file);
+  
+  const imagePart = {
+    inlineData: {
+      data: base64Data,
+      mimeType: 'image/jpeg',
+    },
+  };
 
+  // Simplified prompt for faster processing tokens
   const prompt = `
-    You are an advanced AI data analyst specializing in OCR correction for utility logs.
+    Analyze this utility log. Extract data to calculate monthly usage.
     
-    **TASK**: 
-    Analyze the provided utility data table image and extract the **Start Reading** and **End Reading** to calculate monthly usage.
-    
-    **SPECIFIC REQUIREMENT**:
-    The user wants to calculate usage based on:
-    1. **Start Reading**: The reading on the **1st day of the target month** (e.g., '2024-01-01') at **00:00**.
-    2. **End Reading**: The reading on the **Last day of the target month** (e.g., '2024-01-31') at **00:00** (or the closest available timestamp to the end of the month if 00:00 is missing).
-    
-    **STRATEGY**:
-    1. **Scan All Rows**: Identify the date column and value column.
-    2. **Find Start**: Look for row matching "Day 01" at "00:00".
-    3. **Find End**: Look for row matching the last day (28, 29, 30, or 31) at "00:00". 
-       - If "Last Day 00:00" is missing, try finding "Next Month 1st 00:00" as it is equivalent.
-       - If neither exists, take the very last recorded entry in the table.
-    4. **Calculate Usage**: |End Value - Start Value|.
+    **RULES**:
+    1. **Start**: Reading on **1st day of month** at 00:00.
+    2. **End**: Reading on **Last day of month** at 00:00 (or closest equivalent like Next Month 1st 00:00).
+    3. **Usage**: |End - Start|.
+    4. **Fix OCR**: Correct common errors (e.g. 7 vs 1, 8 vs 0) based on context.
 
-    **OCR CORRECTION TIPS**:
-    - **7 vs 4**: A '7' often looks like a '4' in low res. Check the top bar angle.
-    - **8 vs 6/9**: Check for closed loops.
-    - **Decimals**: Look carefully for dots or commas. "12345.6"
-    - **Consistency**: The End Value should be >= Start Value (usually). If End < Start, check if the meter rolled over or if OCR misread a digit.
-
-    **OUTPUT FORMAT**:
-    Return JSON only.
+    Return JSON.
   `;
 
   try {
+    // Switch to gemini-2.5-flash-latest for maximum speed on vision tasks
     const response = await generateContentWithRetry(
-      'gemini-3-flash-preview', 
+      'gemini-2.5-flash-latest', 
       {
         parts: [
           imagePart,
@@ -188,10 +215,10 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
     
     // User-friendly error mapping
     if (error.message?.includes('API Key is missing')) {
-      throw new Error("System Error: API Key is not configured. Please verify Vercel Environment Variables.");
+      throw new Error("Setup Error: Key not found. Please rename your Vercel Environment Variable to 'VITE_API_KEY' and Redeploy.");
     }
     if (error.message?.includes('429') || error.message?.includes('quota')) {
-       throw new Error("Server is busy (Quota Exceeded). Please wait a moment and try again.");
+       throw new Error("Server is busy. Please try again in a few seconds.");
     }
     
     throw new Error(error.message || "Failed to analyze the image.");
