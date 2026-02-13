@@ -1,7 +1,19 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult, GeminiResponseSchema } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Safety check for API Key retrieval to prevent crashes in environments where 'process' is undefined (e.g., standard browser builds without polyfills)
+const getApiKey = () => {
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      return process.env.API_KEY;
+    }
+  } catch (e) {
+    // Ignore error
+  }
+  return '';
+};
+
+const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: string; mimeType: string } }> => {
   return new Promise((resolve, reject) => {
