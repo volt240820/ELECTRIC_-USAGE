@@ -1,8 +1,6 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Tenant, AnalysisResult } from '../types';
-import { FileImage, Download, Loader2, ZoomIn, X, Link, ImageOff, Share2, Copy, Check, ImageIcon, BellRing, MousePointerClick, ClipboardCopy, MessageSquare } from 'lucide-react';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { FileImage, Download, ZoomIn, X, ImageOff, Check } from 'lucide-react';
 
 interface InvoiceData {
   tenant: Tenant;
@@ -32,105 +30,11 @@ const Toast: React.FC<{ message: string; onClose: () => void }> = ({ message, on
   }, [onClose]);
 
   return (
-    <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 animate-fade-in-up z-[9999]">
+    <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 animate-fade-in-up z-[9999] print:hidden">
       <div className="bg-green-500 rounded-full p-1">
         <Check className="w-3 h-3 text-white" />
       </div>
       <span className="text-sm font-medium whitespace-nowrap">{message}</span>
-    </div>
-  );
-};
-
-// Preview Modal for Desktop Sharing
-const SharePreviewModal: React.FC<{ 
-  isOpen: boolean; 
-  onClose: () => void; 
-  imageBlob: Blob | null; 
-  shareText: string;
-  showToast: (msg: string) => void;
-}> = ({ isOpen, onClose, imageBlob, shareText, showToast }) => {
-  const [imgUrl, setImgUrl] = useState<string>('');
-
-  useEffect(() => {
-    if (imageBlob) {
-      const url = URL.createObjectURL(imageBlob);
-      setImgUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-  }, [imageBlob]);
-
-  if (!isOpen || !imageBlob) return null;
-
-  const handleCopyImage = async () => {
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          [imageBlob.type]: imageBlob
-        })
-      ]);
-      showToast("📸 Image Copied! Paste it (Ctrl+V) in chat.");
-    } catch (e) {
-      console.error(e);
-      showToast("❌ Browser blocked image copy. Right-click image to copy.");
-    }
-  };
-
-  const handleCopyText = async () => {
-    try {
-      await navigator.clipboard.writeText(shareText);
-      showToast("📝 Text & Link Copied!");
-    } catch (e) {
-      showToast("❌ Failed to copy text.");
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
-      <div 
-        className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col max-h-[90vh]" 
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-          <h3 className="font-bold text-gray-800 flex items-center gap-2">
-            <Share2 className="w-5 h-5 text-blue-600" /> Share Preview
-          </h3>
-          <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded-full transition-colors">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-        
-        <div className="p-6 overflow-y-auto flex flex-col items-center gap-6 bg-gray-100">
-           {/* Image Preview */}
-           <div className="relative shadow-lg rounded-lg overflow-hidden group">
-             <img src={imgUrl} alt="Card Preview" className="max-w-full w-auto max-h-[400px] object-contain bg-white" />
-             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <span className="text-white font-medium text-sm bg-black/50 px-3 py-1 rounded-full">Preview Only</span>
-             </div>
-           </div>
-
-           <div className="w-full space-y-3">
-             <div className="bg-blue-50 p-3 rounded-lg text-xs text-blue-800 border border-blue-100 mb-2">
-               <strong>Tip:</strong> Send the image first, then the text link.
-             </div>
-
-             <button 
-                onClick={handleCopyImage}
-                className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-50 border border-gray-300 text-gray-800 font-bold py-3 rounded-xl transition-all active:scale-95 shadow-sm"
-             >
-                <ImageIcon className="w-5 h-5 text-purple-600" />
-                1. Copy Image
-             </button>
-
-             <button 
-                onClick={handleCopyText}
-                className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95 shadow-md"
-             >
-                <MessageSquare className="w-5 h-5" />
-                2. Copy Message & Link
-             </button>
-           </div>
-        </div>
-      </div>
     </div>
   );
 };
@@ -151,31 +55,40 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
   }, [item.file, item.isShared, item.thumbnailUrl]);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 break-inside-avoid shadow-sm print:shadow-none print:border print:border-gray-300 print:mb-4">
+    <div className="bg-white border border-gray-200 rounded-lg p-4 break-inside-avoid shadow-sm print:shadow-none print:border print:border-gray-300 print:mb-8 print:break-inside-avoid">
       <div className="mb-3 pb-3 border-b border-gray-100 flex justify-between items-center">
-        <h4 className="font-bold text-gray-800">{item.meterName || 'Meter'}</h4>
-        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded font-mono">Usage: {item.result.usage} kWh</span>
+        <h4 className="font-bold text-gray-800 text-lg print:text-xl">{item.meterName || 'Meter'}</h4>
+        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded font-mono print:text-sm print:font-bold">Usage: {item.result.usage} kWh</span>
       </div>
-      <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-1">
-          <div className="text-xs text-gray-500 mb-1">Previous</div>
-          <div className="font-mono text-sm font-semibold">{item.result.startReading.value}</div>
-          <div className="text-[10px] text-gray-400">{item.result.startReading.date.split(' ')[0]}</div>
+      <div className="grid grid-cols-3 gap-4 print:block">
+        <div className="col-span-1 print:mb-4 print:flex print:justify-between print:border-b print:border-gray-100 print:pb-2">
+           <div className="print:text-left">
+              <div className="text-xs text-gray-500 mb-1">Previous</div>
+              <div className="font-mono text-sm font-semibold">{item.result.startReading.value}</div>
+              <div className="text-[10px] text-gray-400">{item.result.startReading.date.split(' ')[0]}</div>
+           </div>
           
-          <div className="text-xs text-gray-500 mt-3 mb-1">Current</div>
-          <div className="font-mono text-sm font-semibold text-blue-600">{item.result.endReading.value}</div>
-          <div className="text-[10px] text-gray-400">{item.result.endReading.date.split(' ')[0]}</div>
+           <div className="text-xs text-gray-500 mt-3 mb-1 print:mt-0 print:text-right">
+              <div className="text-xs text-gray-500 mb-1">Current</div>
+              <div className="font-mono text-sm font-semibold text-blue-600">{item.result.endReading.value}</div>
+              <div className="text-[10px] text-gray-400">{item.result.endReading.date.split(' ')[0]}</div>
+           </div>
         </div>
         
-        <div className="col-span-2 relative group cursor-pointer" onClick={() => preview && onImageClick(preview)}>
+        <div className="col-span-2 relative group cursor-pointer print:w-full" onClick={() => preview && onImageClick(preview)}>
            {preview ? (
                <>
+                {/* 
+                  Print Style Fix:
+                  print:h-96 -> Forces height to ~380px (approx 10cm)
+                  print:object-contain -> Ensures whole image is visible
+                */}
                 <img 
                     src={preview} 
                     alt="Meter Proof" 
-                    className="w-full h-40 object-contain bg-black/5 rounded border border-gray-200 transition-transform group-hover:brightness-90" 
+                    className="w-full h-40 print:h-[400px] object-contain bg-black/5 rounded border border-gray-200 transition-transform group-hover:brightness-90 print:border-none print:bg-transparent" 
                 />
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity print:hidden">
                     <div className="bg-black/50 text-white p-2 rounded-full backdrop-blur-sm">
                         <ZoomIn className="w-5 h-5" />
                     </div>
@@ -184,7 +97,7 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
            ) : (
                <div className="w-full h-40 bg-gray-50 rounded border border-gray-200 border-dashed flex flex-col items-center justify-center text-gray-400 p-4 text-center">
                    <ImageOff className="w-8 h-8 mb-2 opacity-50" />
-                   <p className="text-[10px] leading-tight text-gray-400">Image not included in link</p>
+                   <p className="text-[10px] leading-tight text-gray-400">Image not included</p>
                </div>
            )}
         </div>
@@ -194,150 +107,14 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
 };
 
 export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedView }) => {
-  const [isProcessing, setIsProcessing] = useState(false);
   const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   
-  // Share Modal State
-  const [shareModal, setShareModal] = useState<{ isOpen: boolean; blob: Blob | null; text: string }>({
-    isOpen: false,
-    blob: null,
-    text: ''
-  });
-
   const showToast = (msg: string) => setToastMsg(msg);
 
-  const handleDownloadPDF = async (e?: React.MouseEvent) => {
-    if (e) e.preventDefault();
-    setIsProcessing(true);
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    
-    try {
-      for (let i = 0; i < invoices.length; i++) {
-        const element = document.getElementById(`invoice-card-${i}`);
-        if (!element) continue;
-
-        const canvas = await html2canvas(element, {
-          scale: 2, 
-          useCORS: true, 
-          logging: false,
-          backgroundColor: '#ffffff'
-        });
-
-        const imgData = canvas.toDataURL('image/png');
-        const imgWidth = 210; 
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-        
-        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-        
-        if (i < invoices.length - 1) {
-          pdf.addPage();
-        }
-      }
-
-      pdf.save(`Invoice_${invoices[0]?.tenant.name || 'Electricity'}.pdf`);
-      showToast("PDF Downloaded!");
-    } catch (error) {
-      console.error("PDF Generation failed:", error);
-      showToast("Failed to generate PDF");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // 1. Generate "Notification Card" (The 'Soomgo' style card)
-  const handleShareSummaryCard = async (e: React.MouseEvent, invoice: InvoiceData, index: number) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsProcessing(true);
-
-    try {
-      const cardElement = document.getElementById(`summary-card-template-${index}`);
-      if (!cardElement) throw new Error("Card template not found");
-
-      // Make visible for capture but keep off-screen
-      cardElement.style.display = 'block';
-
-      const canvas = await html2canvas(cardElement, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false
-      });
-
-      // Hide again
-      cardElement.style.display = 'none';
-
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-      if (!blob) throw new Error("Image generation failed");
-
-      // Generate Link & Text
-      const shareUrl = await generateShareUrl(invoice);
-      const dateStr = new Date().toLocaleDateString();
-      const shareText = `[Electricity Bill]\nTo: ${invoice.tenant.name}\nDate: ${dateStr}\n\n▼ Check Details & Download PDF:\n${shareUrl}`;
-
-      const fileName = `Bill_Card_${invoice.tenant.name}.png`;
-      const file = new File([blob], fileName, { type: 'image/png' });
-
-      // Native Share (Mobile) - Works great
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-         try {
-           await navigator.share({
-             files: [file],
-             title: 'Utility Bill Notification',
-             text: shareText
-           });
-           showToast("Opened Share Sheet!");
-         } catch(e) { console.log('Share cancelled'); }
-      } else {
-        // Desktop - Open Preview Modal instead of downloading
-        setShareModal({
-            isOpen: true,
-            blob: blob,
-            text: shareText
-        });
-      }
-
-    } catch (error) {
-      console.error("Card gen failed", error);
-      showToast("Failed to create card");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Helper to generate the short link
-  const generateShareUrl = async (invoice: InvoiceData): Promise<string> => {
-     const payload = {
-        t: invoice.tenant.name, 
-        p: unitPrice,           
-        i: invoice.items.map(item => ({
-            n: item.meterName,
-            s: item.result.startReading.value,
-            sd: item.result.startReading.date,
-            e: item.result.endReading.value,
-            ed: item.result.endReading.date,
-            u: item.result.usage
-        }))
-    };
-    const encoded = encodeURIComponent(JSON.stringify(payload));
-    return `${window.location.origin}/?share=${encoded}`;
-  };
-
-  // 2. Copy Link Only
-  const handleCopyLink = async (e: React.MouseEvent, invoice: InvoiceData) => {
-      e.preventDefault();
-      e.stopPropagation();
-      try {
-        const shareUrl = await generateShareUrl(invoice);
-        const dateStr = new Date().toLocaleDateString();
-        const msg = `[Electricity Bill]\nTo: ${invoice.tenant.name}\nAmount: ₩${Math.floor(invoice.totalCost * 1.1).toLocaleString()}\n\nLink:\n${shareUrl}`;
-
-        await navigator.clipboard.writeText(msg);
-        showToast("Link Copied!");
-      } catch (err) {
-          showToast("Failed to copy link");
-      }
+  const handlePrint = () => {
+    window.print();
+    showToast("Opening Print Dialog...");
   };
 
   if (invoices.length === 0) return null;
@@ -347,14 +124,6 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
       
       {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg(null)} />}
 
-      <SharePreviewModal 
-        isOpen={shareModal.isOpen}
-        onClose={() => setShareModal(prev => ({ ...prev, isOpen: false }))}
-        imageBlob={shareModal.blob}
-        shareText={shareModal.text}
-        showToast={showToast}
-      />
-
       {/* SHARED VIEW: Tenant Banner */}
       {isSharedView && (
           <div className="bg-blue-600 text-white p-6 rounded-xl shadow-lg mb-8 text-center animate-fade-in print:hidden">
@@ -362,11 +131,11 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
               <p className="opacity-90 mb-6 text-sm">Please review your usage below.</p>
               <button 
                 type="button"
-                onClick={handleDownloadPDF}
+                onClick={handlePrint}
                 className="bg-white text-blue-700 hover:bg-blue-50 px-6 py-3 rounded-full font-bold shadow-md inline-flex items-center gap-2 transform active:scale-95 transition-all"
               >
                   <Download className="w-5 h-5" />
-                  Download Official PDF
+                  Print / Save as PDF
               </button>
           </div>
       )}
@@ -376,16 +145,15 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center mb-8 print:hidden relative z-40">
             <div>
             <h2 className="font-bold text-gray-800">Generated Invoices ({invoices.length})</h2>
-            <p className="text-sm text-gray-500">Send notification cards or download PDFs.</p>
+            <p className="text-sm text-gray-500">Review detailed invoices below.</p>
             </div>
             <button 
                 type="button"
-                onClick={handleDownloadPDF}
-                disabled={isProcessing}
+                onClick={handlePrint}
                 className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors text-sm"
             >
-                {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                Download All PDF
+                <Download className="w-4 h-4" />
+                Print All Invoices
             </button>
         </div>
       )}
@@ -393,73 +161,8 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
       {invoices.map((invoice, idx) => (
         <div 
           key={invoice.tenant.id} 
-          id={`invoice-card-${idx}`}
           className="bg-white shadow-2xl rounded-none md:rounded-lg overflow-hidden print:overflow-visible max-w-[210mm] mx-auto print:shadow-none print:w-full print:max-w-none print:break-after-page mb-16 relative group"
         >
-          
-          {/* --- HIDDEN SUMMARY CARD TEMPLATE (For Image Generation) --- */}
-          <div 
-            id={`summary-card-template-${idx}`} 
-            className="fixed top-0 left-0 z-[-50] bg-white p-8 w-[400px] font-sans text-left hidden"
-            style={{ border: '1px solid #e5e7eb' }} // Explicit border for canvas
-          >
-             <div className="mb-6">
-                <p className="text-gray-500 text-sm mb-1">Hello,</p>
-                <h2 className="text-xl font-bold text-gray-900 mb-1">{invoice.tenant.name}</h2>
-                <p className="text-gray-600 text-sm">Your electricity bill for {new Date().toLocaleDateString()} is ready.</p>
-             </div>
-
-             <div className="bg-gray-50 rounded-xl p-6 mb-6 text-center border border-gray-100">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Total Amount Due</p>
-                <p className="text-3xl font-extrabold text-gray-900">₩ {Math.floor(invoice.totalCost * 1.1).toLocaleString()}</p>
-             </div>
-
-             {/* The Visual Button (Not clickable in image, but gives visual cue) */}
-             <div className="bg-[#6b46c1] text-white py-3.5 px-4 rounded-lg text-center font-bold text-sm shadow-sm mb-6 flex items-center justify-center gap-2">
-                <MousePointerClick className="w-4 h-4" /> View Bill Details
-             </div>
-
-             <div className="pt-4 border-t border-gray-100">
-                <p className="text-[10px] text-gray-400 leading-relaxed text-center">
-                  This is an automated notification.<br/>
-                  Please check the link provided with this card for details.
-                </p>
-             </div>
-          </div>
-          {/* -------------------------------------------------------- */}
-
-          {/* Action Overlay (Hover) - Hidden in Shared View & Print */}
-          {!isSharedView && (
-            <div 
-                className="absolute top-4 right-4 flex gap-2 print:hidden opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                data-html2canvas-ignore="true"
-            >
-                {/* 1. Share Notification Card (Priority) */}
-                <button 
-                type="button"
-                onClick={(e) => handleShareSummaryCard(e, invoice, idx)}
-                disabled={isProcessing}
-                className="bg-[#6b46c1] hover:bg-[#553c9a] text-white px-4 py-2 rounded-full shadow-lg cursor-pointer transform hover:scale-105 transition-all flex items-center gap-2 font-bold text-sm"
-                title="Create Notification Card Image"
-                >
-                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <BellRing className="w-4 h-4" />}
-                    Create Card
-                </button>
-
-                 {/* 2. Copy Link */}
-                 <button 
-                type="button"
-                onClick={(e) => handleCopyLink(e, invoice)}
-                disabled={isProcessing}
-                className="bg-white hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-full shadow-md border border-gray-200 cursor-pointer transform hover:scale-105 transition-all flex items-center gap-2 font-medium text-sm"
-                title="Copy Link Only"
-                >
-                    <Link className="w-4 h-4" />
-                    Link
-                </button>
-            </div>
-          )}
-
           {/* Invoice Header */}
           <div className="bg-slate-900 text-white p-8 print:bg-white print:text-black print:border-b-2 print:border-black">
             <div className="flex justify-between items-start">
@@ -558,7 +261,8 @@ export const Invoice: React.FC<InvoiceProps> = ({ invoices, unitPrice, isSharedV
                 <FileImage className="w-4 h-4" /> Reading Evidence
               </h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:grid-cols-2 print:gap-6">
+              {/* PRINT: 1 Column, LARGE Images (400px height) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:grid-cols-1 print:gap-12">
                 {invoice.items.map((item, idx) => (
                   <EvidenceItem key={idx} item={item} onImageClick={setViewingImageUrl} />
                 ))}
