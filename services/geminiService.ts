@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult, GeminiResponseSchema } from "../types";
 
@@ -182,15 +183,18 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
 
   // Simplified prompt for faster processing tokens
   const prompt = `
-    Analyze this utility log. Extract data to calculate monthly usage.
+    Analyze this utility log table (electricity/gas/water). 
+    Extract the Start and End readings to calculate monthly usage.
     
-    **RULES**:
-    1. **Start**: Reading on **1st day of month** at 00:00.
-    2. **End**: Reading on **Last day of month** at 00:00 (or closest equivalent like Next Month 1st 00:00).
-    3. **Usage**: |End - Start|.
-    4. **Fix OCR**: Correct common errors (e.g. 7 vs 1, 8 vs 0) based on context.
-
-    Return JSON.
+    **CRITICAL EXTRACTION RULES**:
+    1. **Start Reading**: Find the row for the **1st day of the month** (e.g., 01 or 1st) at **00:00** (midnight).
+    2. **End Reading**: Find the row for the **Last day of the month** (e.g., 30th or 31st) at **24:00**, OR the **1st day of the NEXT month** at **00:00**. 
+       (e.g., If calculating Jan usage, start = Jan 1 00:00, end = Feb 1 00:00).
+       - If only "Last day 00:00" is available, use that, but prefer the full month boundary (Next 1st 00:00).
+    3. **Usage**: Calculate the absolute difference: |End Value - Start Value|.
+    4. **OCR Correction**: Fix common digit errors (e.g. 1 vs 7, 0 vs 8, 5 vs 6) based on the sequence of numbers.
+    
+    Return JSON format.
   `;
 
   try {
