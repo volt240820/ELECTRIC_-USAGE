@@ -112,8 +112,8 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
                       <div className="p-2 bg-blue-50 rounded-lg">
                           <FileText className="w-5 h-5 text-blue-600" />
                       </div>
-                      <div>
-                          <h3 className="font-bold text-gray-900 text-lg">Verification</h3>
+                      <div className="min-w-0 flex-1">
+                          <h3 className="font-bold text-gray-900 text-lg truncate" title={fileName}>{displayName}</h3>
                           <p className="text-sm text-gray-500">Confirm reading data matches the photo</p>
                       </div>
                   </div>

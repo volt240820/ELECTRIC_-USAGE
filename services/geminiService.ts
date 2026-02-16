@@ -3,7 +3,7 @@ import { AnalysisResult, GeminiResponseSchema } from "../types";
 
 // Helper function to safely retrieve API Key from various environment configurations
 const getApiKey = (): string => {
-  // 1. Try Vite-specific import.meta.env (Primary for Vite apps)
+  // 1. Try Vite-specific import.meta.env (Primary for Vite apps, Cloudflare Pages, Vercel)
   try {
     // @ts-ignore
     if (import.meta?.env?.VITE_API_KEY) {
@@ -283,7 +283,7 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
     const lowerMsg = errorMessage.toLowerCase();
 
     if (lowerMsg.includes('api key is missing')) {
-      throw new Error("Setup Error: Key not found. Please rename your Vercel Environment Variable to 'VITE_API_KEY' and Redeploy.");
+      throw new Error("Setup Error: Key not found. Please set 'VITE_API_KEY' in Cloudflare Pages settings (Environment Variables).");
     }
     if (lowerMsg.includes('429') || lowerMsg.includes('quota') || lowerMsg.includes('exhausted')) {
        throw new Error("Server is busy (Quota Limit). Please try again in 1 minute.");

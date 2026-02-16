@@ -28,6 +28,7 @@ const App: React.FC = () => {
   // Config State
   const [tenants, setTenants] = useState<Tenant[]>(DEFAULT_TENANTS);
   const [unitPrice, setUnitPrice] = useState<number>(150);
+  const [showCost, setShowCost] = useState<boolean>(false); // Default to false as per request
   const [showConfig, setShowConfig] = useState(false);
   const [newMeterInputs, setNewMeterInputs] = useState<{[key: string]: string}>({});
 
@@ -49,8 +50,11 @@ const App: React.FC = () => {
         
         const sharedTenantId = 'shared-tenant';
         
-        // 1. Set Unit Price
-        if (decoded.p) setUnitPrice(Number(decoded.p));
+        // 1. Set Unit Price & Show Cost if price exists
+        if (decoded.p) {
+          setUnitPrice(Number(decoded.p));
+          setShowCost(true);
+        }
 
         // 2. Setup Tenant
         const sharedTenant: Tenant = {
@@ -93,7 +97,13 @@ const App: React.FC = () => {
   }, []);
 
   const handleImagesSelect = (files: File[]) => {
-    const newItems: AnalysisItem[] = files.map(file => ({
+    // Sort newly selected files by name naturally (e.g. "Meter 1", "Meter 2", "Meter 10")
+    // This ensures the order in the UI matches the user's file explorer order
+    const sortedFiles = Array.from(files).sort((a, b) => 
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    );
+
+    const newItems: AnalysisItem[] = sortedFiles.map(file => ({
       id: Math.random().toString(36).substr(2, 9),
       file,
       status: 'idle',
@@ -229,14 +239,30 @@ const App: React.FC = () => {
           <div className="flex items-center gap-4">
              {!isSharedView && (
                <>
-                <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
-                    <span className="text-sm font-semibold text-gray-500">Unit Price (₩/kWh):</span>
-                    <input 
-                      type="number" 
-                      value={unitPrice}
-                      onChange={(e) => setUnitPrice(Number(e.target.value))}
-                      className="w-20 bg-transparent font-bold text-gray-800 focus:outline-none text-right"
-                    />
+                <div className="flex items-center gap-3 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm transition-all hover:border-blue-300">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input 
+                            type="checkbox" 
+                            checked={showCost} 
+                            onChange={(e) => setShowCost(e.target.checked)}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300 cursor-pointer"
+                        />
+                        <span className={`text-sm font-semibold transition-colors ${showCost ? 'text-gray-800' : 'text-gray-500'}`}>
+                            Include Cost
+                        </span>
+                    </label>
+
+                    <div className={`flex items-center gap-2 overflow-hidden transition-all duration-300 ${showCost ? 'w-auto opacity-100 ml-2 pl-2 border-l border-gray-300' : 'w-0 opacity-0'}`}>
+                        <span className="text-xs font-bold text-gray-500 uppercase whitespace-nowrap">Rate:</span>
+                        <input 
+                            type="number" 
+                            value={unitPrice}
+                            onChange={(e) => setUnitPrice(Number(e.target.value))}
+                            className="w-20 bg-transparent font-bold text-gray-800 focus:outline-none text-right"
+                            placeholder="0"
+                        />
+                        <span className="text-xs text-gray-500 font-bold">₩</span>
+                    </div>
                 </div>
                 
                 <button 
@@ -516,7 +542,12 @@ const App: React.FC = () => {
                  </button>
                </div>
              ) : (
-                <Invoice invoices={invoiceData} unitPrice={unitPrice} isSharedView={isSharedView} />
+                <Invoice 
+                  invoices={invoiceData} 
+                  unitPrice={unitPrice} 
+                  isSharedView={isSharedView} 
+                  showCost={showCost}
+                />
              )}
            </div>
         )}
