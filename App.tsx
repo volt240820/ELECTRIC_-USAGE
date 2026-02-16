@@ -1,10 +1,11 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { ImageUploader } from './components/ImageUploader';
 import { AnalysisResults } from './components/AnalysisResults';
 import { Invoice } from './components/Invoice';
 import { analyzeMeterImage } from './services/geminiService';
 import { AnalysisResult, Tenant, MeterAssignment } from './types';
-import { Activity, AlertCircle, Loader2, Settings, Users, FileText, ChevronRight, Plus, X, Trash2, Building } from 'lucide-react';
+import { Activity, AlertCircle, Loader2, Settings, Users, FileText, ChevronRight, Plus, X, Trash2, Building, RotateCcw } from 'lucide-react';
 
 interface AnalysisItem {
   id: string;
@@ -25,12 +26,45 @@ const DEFAULT_TENANTS: Tenant[] = [
 ];
 
 const App: React.FC = () => {
-  // Config State
-  const [tenants, setTenants] = useState<Tenant[]>(DEFAULT_TENANTS);
-  const [unitPrice, setUnitPrice] = useState<number>(150);
-  const [showCost, setShowCost] = useState<boolean>(false); // Default to false as per request
+  // Config State with Persistence
+  const [tenants, setTenants] = useState<Tenant[]>(() => {
+    try {
+      const saved = localStorage.getItem('app_tenants');
+      return saved ? JSON.parse(saved) : DEFAULT_TENANTS;
+    } catch (e) {
+      return DEFAULT_TENANTS;
+    }
+  });
+
+  const [unitPrice, setUnitPrice] = useState<number>(() => {
+     try {
+       const saved = localStorage.getItem('app_unitPrice');
+       return saved ? Number(saved) : 150;
+     } catch(e) { return 150; }
+  });
+
+  const [showCost, setShowCost] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('app_showCost');
+      return saved ? JSON.parse(saved) : false;
+    } catch(e) { return false; }
+  });
+
   const [showConfig, setShowConfig] = useState(false);
   const [newMeterInputs, setNewMeterInputs] = useState<{[key: string]: string}>({});
+
+  // Persistence Effects
+  useEffect(() => {
+    localStorage.setItem('app_tenants', JSON.stringify(tenants));
+  }, [tenants]);
+
+  useEffect(() => {
+    localStorage.setItem('app_unitPrice', unitPrice.toString());
+  }, [unitPrice]);
+
+  useEffect(() => {
+    localStorage.setItem('app_showCost', JSON.stringify(showCost));
+  }, [showCost]);
 
   // App State
   const [items, setItems] = useState<AnalysisItem[]>([]);
@@ -179,6 +213,17 @@ const App: React.FC = () => {
     const newTenants = [...tenants];
     newTenants[tenantIndex].meters.splice(meterIndex, 1);
     setTenants(newTenants);
+  };
+
+  const handleResetConfig = () => {
+    if (confirm("Are you sure you want to reset all settings to default? This will remove your custom companies and meters.")) {
+      setTenants(DEFAULT_TENANTS);
+      setUnitPrice(150);
+      setShowCost(false);
+      localStorage.removeItem('app_tenants');
+      localStorage.removeItem('app_unitPrice');
+      localStorage.removeItem('app_showCost');
+    }
   };
 
   const pendingCount = items.filter(i => i.status === 'idle').length;
@@ -378,7 +423,15 @@ const App: React.FC = () => {
               </button>
             </div>
 
-            <div className="pt-4 border-t text-right">
+            <div className="pt-4 border-t border-gray-200 flex justify-between items-center">
+               <button 
+                onClick={handleResetConfig}
+                className="flex items-center gap-1.5 text-xs font-medium text-red-500 hover:text-red-700 hover:underline transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset Defaults
+              </button>
+
               <button 
                 onClick={() => setShowConfig(false)}
                 className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition-colors"
