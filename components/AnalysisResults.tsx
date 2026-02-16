@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { AnalysisResult, Tenant, MeterAssignment } from '../types';
 import { Calendar, Zap, FileImage, Building2, ChevronDown, CheckCircle2, FileText, ZoomIn, X } from 'lucide-react';
@@ -202,8 +203,8 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
                               <span className="text-xs font-bold text-gray-400 uppercase flex items-center gap-1">
                                   <Calendar className="w-3 h-3" /> Previous
                               </span>
-                              <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono">
-                                  {localResult.startReading.date.split(' ')[0]}
+                              <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono truncate max-w-[120px]" title={localResult.startReading.date}>
+                                  {localResult.startReading.date}
                               </span>
                           </div>
                           <input 
@@ -221,8 +222,8 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
                               <span className="text-xs font-bold text-blue-600 uppercase flex items-center gap-1">
                                   <CheckCircle2 className="w-3 h-3" /> Current
                               </span>
-                              <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-mono">
-                                  {localResult.endReading.date.split(' ')[0]}
+                              <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-mono truncate max-w-[120px]" title={localResult.endReading.date}>
+                                  {localResult.endReading.date}
                               </span>
                           </div>
                           <input 

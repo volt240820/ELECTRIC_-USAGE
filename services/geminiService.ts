@@ -136,6 +136,11 @@ const generateContentWithRetry = async (
     throw new Error("API Key is missing");
   }
   
+  // Basic validation to prevent confusing errors when user inputs Project ID instead of Key
+  if (!apiKey.startsWith("AIza")) {
+    throw new Error("Invalid API Key format. Key must start with 'AIza'. Check your Cloudflare settings.");
+  }
+  
   const ai = new GoogleGenAI({ apiKey });
 
   let currentDelay = initialDelay;
@@ -188,11 +193,13 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
     
     **CRITICAL EXTRACTION RULES**:
     1. **Start Reading**: Find the row for the **1st day of the month** (e.g., 01 or 1st) at **00:00** (midnight).
-    2. **End Reading**: Find the row for the **Last day of the month** (e.g., 30th or 31st) at **24:00**, OR the **1st day of the NEXT month** at **00:00**. 
-       (e.g., If calculating Jan usage, start = Jan 1 00:00, end = Feb 1 00:00).
-       - If only "Last day 00:00" is available, use that, but prefer the full month boundary (Next 1st 00:00).
+    2. **End Reading**: Find the row that represents the end of the monthly period.
+       - **Priority A**: **1st day of the NEXT month** at **00:00**.
+       - **Priority B**: **Last day of the CURRENT month** at **24:00**.
+       - **Priority C**: **Last day of the CURRENT month** at **00:00** (Use this if Priorities A/B are unavailable, or if it explicitly marks the period end).
     3. **Usage**: Calculate the absolute difference: |End Value - Start Value|.
-    4. **OCR Correction**: Fix common digit errors (e.g. 1 vs 7, 0 vs 8, 5 vs 6) based on the sequence of numbers.
+    4. **Date Format**: Return the date string EXACTLY as "YYYY-MM-DD HH:MM". (e.g., 2023-10-01 00:00).
+    5. **OCR Correction**: Fix common digit errors (e.g. 1 vs 7, 0 vs 8, 5 vs 6) based on the sequence of numbers.
     
     Return JSON format.
   `;
@@ -288,6 +295,9 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
 
     if (lowerMsg.includes('api key is missing')) {
       throw new Error("Setup Error: Key not found. Please set 'VITE_API_KEY' in Cloudflare Pages settings (Environment Variables).");
+    }
+    if (lowerMsg.includes('invalid api key format')) {
+        throw new Error("Setup Error: The API Key looks like a Project ID. Please use a key starting with 'AIza...'.");
     }
     if (lowerMsg.includes('429') || lowerMsg.includes('quota') || lowerMsg.includes('exhausted')) {
        throw new Error("Server is busy (Quota Limit). Please try again in 1 minute.");

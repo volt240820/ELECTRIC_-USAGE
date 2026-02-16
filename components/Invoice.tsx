@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { Tenant, AnalysisResult } from '../types';
 import { FileImage, Download, ZoomIn, X, ImageOff, Check, Loader2 } from 'lucide-react';
@@ -70,13 +71,13 @@ const EvidenceItem: React.FC<{ item: InvoiceData['items'][0], onImageClick: (url
            <div className="text-left">
               <div className="text-xs text-gray-500 mb-1">Previous</div>
               <div className="font-mono text-base font-semibold">{item.result.startReading.value}</div>
-              <div className="text-xs text-gray-400">{item.result.startReading.date.split(' ')[0]}</div>
+              <div className="text-xs text-gray-400">{item.result.startReading.date}</div>
            </div>
           
            <div className="text-right">
               <div className="text-xs text-gray-500 mb-1">Current</div>
               <div className="font-mono text-base font-semibold text-blue-600">{item.result.endReading.value}</div>
-              <div className="text-xs text-gray-400">{item.result.endReading.date.split(' ')[0]}</div>
+              <div className="text-xs text-gray-400">{item.result.endReading.date}</div>
            </div>
         </div>
         
