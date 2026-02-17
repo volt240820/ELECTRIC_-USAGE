@@ -133,8 +133,8 @@ const generateContentWithRetry = async (
   model: string, 
   contents: any, 
   config: any, 
-  retries = 3, 
-  initialDelay = 2000
+  retries = 5, // Increased retries from 3 to 5
+  initialDelay = 3000 // Increased initial delay from 2s to 3s
 ) => {
   // Lazy initialization of the client to prevent top-level crashes
   const apiKey = getApiKey();
@@ -168,7 +168,7 @@ const generateContentWithRetry = async (
       if (isQuotaError && i < retries) {
         console.warn(`API Quota hit. Retrying in ${currentDelay}ms... (Attempt ${i + 1}/${retries})`);
         await wait(currentDelay);
-        currentDelay *= 2; // Exponential backoff (2s -> 4s -> 8s)
+        currentDelay *= 2; // Exponential backoff (3s -> 6s -> 12s)
         continue;
       }
       

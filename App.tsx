@@ -171,8 +171,14 @@ const App: React.FC = () => {
     setIsAnalyzingAll(true);
     const idleItems = items.filter(i => i.status === 'idle' || i.status === 'error');
     
-    // Run all in parallel
-    await Promise.all(idleItems.map(item => analyzeItem(item)));
+    // CHANGE: Run sequentially (one by one) instead of parallel to avoid hitting API Rate Limits (Quota)
+    // Free tier allows ~15 requests per minute, but burst requests (Promise.all) often trigger 429 errors.
+    for (const item of idleItems) {
+      await analyzeItem(item);
+      // Add a small 1-second delay between requests to be gentle on the API
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
     setIsAnalyzingAll(false);
   };
 
