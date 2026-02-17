@@ -2,11 +2,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult, GeminiResponseSchema } from "../types";
 
-// Helper function to safely retrieve API Key from various environment configurations
+// Helper function to safely retrieve API Key
 const getApiKey = (): string => {
   let key = '';
-
-  // 1. Try Vite-specific import.meta.env (Primary for Vite apps, Cloudflare Pages, Vercel)
   try {
     // @ts-ignore
     if (import.meta?.env?.VITE_API_KEY) {
@@ -15,7 +13,6 @@ const getApiKey = (): string => {
     }
   } catch (e) {}
 
-  // 2. Try standard process.env (Fallback)
   if (!key) {
     try {
       if (typeof process !== 'undefined' && process.env?.API_KEY) {
@@ -23,14 +20,11 @@ const getApiKey = (): string => {
       }
     } catch (e) {}
   }
-
-  // Sanitize: Trim whitespace and remove surrounding quotes if present
-  // This handles cases where users accidentally paste "AIza..." or 'AIza...' or add spaces.
   return key.trim().replace(/^["']|["']$/g, '');
 };
 
-// Optimization: Compress and Resize Image before sending to API
-// Reduces payload size from ~5MB (PNG) to ~150KB (JPG), speeding up transfer and inference significantly.
+// Optimization: Compress and Resize Image
+// Reduced MAX_SIZE to 800px to further lower token usage and improve success rate
 const compressImage = async (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -41,9 +35,8 @@ const compressImage = async (file: File): Promise<string> => {
       const canvas = document.createElement('canvas');
       let { width, height } = img;
       
-      // Limit max dimension to 1024px. 
-      // This is sufficient for OCR but vastly faster than full 4K screenshots.
-      const MAX_SIZE = 1024;
+      // 800px is sufficient for meter digits and drastically reduces payload/latency
+      const MAX_SIZE = 800;
       if (width > height && width > MAX_SIZE) {
         height = Math.round((height * MAX_SIZE) / width);
         width = MAX_SIZE;
@@ -62,15 +55,14 @@ const compressImage = async (file: File): Promise<string> => {
         return;
       }
       
-      // White background (handles transparent PNGs)
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
       
-      // Convert to JPEG with 0.7 quality (Good balance for OCR speed/accuracy)
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      // 0.6 quality is optimal for text readability while minimizing size
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
       URL.revokeObjectURL(url);
-      resolve(dataUrl.split(',')[1]); // Return base64 string only
+      resolve(dataUrl.split(',')[1]); 
     };
     
     img.onerror = (err) => {
@@ -80,7 +72,6 @@ const compressImage = async (file: File): Promise<string> => {
   });
 };
 
-// NEW: Create a tiny thumbnail for URL sharing (< 2KB target)
 export const createThumbnail = async (file: File): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -91,7 +82,6 @@ export const createThumbnail = async (file: File): Promise<string> => {
         const canvas = document.createElement('canvas');
         let { width, height } = img;
         
-        // Ultra-aggressive resize for URL sharing (max 120px width)
         const MAX_SIZE = 120;
         if (width > height && width > MAX_SIZE) {
           height = Math.round((height * MAX_SIZE) / width);
@@ -105,17 +95,12 @@ export const createThumbnail = async (file: File): Promise<string> => {
         canvas.height = height;
         
         const ctx = canvas.getContext('2d');
-        if (!ctx) {
-            resolve(""); // Fail gracefully
-            return;
-        }
+        if (!ctx) { resolve(""); return; }
         
-        // Draw
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
         
-        // Low quality JPEG
         const dataUrl = canvas.toDataURL('image/jpeg', 0.4); 
         URL.revokeObjectURL(url);
         resolve(dataUrl.split(',')[1]); 
@@ -123,33 +108,26 @@ export const createThumbnail = async (file: File): Promise<string> => {
       
       img.onerror = () => resolve("");
     });
-  };
+};
 
-// Helper function for delay
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Wrapper to handle quota limits with retry logic
-const generateContentWithRetry = async (
-  model: string, 
-  contents: any, 
-  config: any, 
-  retries = 5, // Increased retries from 3 to 5
-  initialDelay = 3000 // Increased initial delay from 2s to 3s
-) => {
-  // Lazy initialization of the client to prevent top-level crashes
+// Fallback Strategy: List of models to try in order
+// If the experimental 3.0 model is busy (429), we fall back to 2.0 or Stable Flash
+const MODELS_TO_TRY = [
+  'gemini-3-flash-preview', // Primary: Smartest
+  'gemini-2.0-flash-exp',   // Secondary: Fast & generous limits
+  'gemini-flash-latest'     // Tertiary: Most stable
+];
+
+const generateContentWithFallback = async (contents: any, config: any) => {
   const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error("API Key is missing");
-  }
-  
-  // Removed strict 'startsWith(AIza)' check to allow flexibility.
-  // The API call itself will fail if the key is invalid, which is handled in the catch block.
-  
+  if (!apiKey) throw new Error("API Key is missing");
   const ai = new GoogleGenAI({ apiKey });
 
-  let currentDelay = initialDelay;
-  
-  for (let i = 0; i <= retries; i++) {
+  let lastError: any;
+
+  for (const model of MODELS_TO_TRY) {
     try {
       const response = await ai.models.generateContent({
         model,
@@ -158,29 +136,40 @@ const generateContentWithRetry = async (
       });
       return response;
     } catch (error: any) {
-      // Check if it's a quota or rate limit error
-      const errorMessage = JSON.stringify(error).toLowerCase();
-      const isQuotaError = errorMessage.includes('429') || 
-                           errorMessage.includes('quota') || 
-                           errorMessage.includes('exhausted') ||
-                           errorMessage.includes('too many requests');
+      console.warn(`Model ${model} failed:`, error.message);
+      lastError = error;
 
-      if (isQuotaError && i < retries) {
-        console.warn(`API Quota hit. Retrying in ${currentDelay}ms... (Attempt ${i + 1}/${retries})`);
-        await wait(currentDelay);
-        currentDelay *= 2; // Exponential backoff (3s -> 6s -> 12s)
-        continue;
-      }
+      // Check for specific errors that warrant trying another model
+      const msg = error.message?.toLowerCase() || '';
       
-      // If it's not a quota error or we ran out of retries, throw the error
+      // 429: Quota Exceeded / Resource Exhausted / Busy
+      // 503: Service Unavailable / Overloaded
+      // 404: Model not found (experimental models sometimes disappear)
+      const shouldRetry = msg.includes('429') || 
+                          msg.includes('quota') || 
+                          msg.includes('exhausted') || 
+                          msg.includes('busy') ||
+                          msg.includes('503') || 
+                          msg.includes('overloaded') ||
+                          msg.includes('404') || 
+                          msg.includes('not found');
+
+      if (shouldRetry) {
+         // Wait briefly before switching models
+         await wait(500); 
+         continue; // Try next model in loop
+      }
+
+      // If it's a 400 (Bad Request) or 401 (Auth), retrying other models usually won't help
       throw error;
     }
   }
-  throw new Error("Failed to connect to AI service after multiple attempts.");
+  
+  // If all models fail
+  throw lastError || new Error("All AI models are currently busy. Please try again later.");
 };
 
 export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => {
-  // Use compressed image for speed
   const base64Data = await compressImage(file);
   
   const imagePart = {
@@ -190,28 +179,22 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
     },
   };
 
-  // Simplified prompt for faster processing tokens
   const prompt = `
-    Analyze this utility log table (electricity/gas/water). 
-    Extract the Start and End readings to calculate monthly usage.
+    Analyze this utility log table. Extract Start/End readings for monthly usage.
     
-    **CRITICAL EXTRACTION RULES**:
-    1. **Start Reading**: Find the row for the **1st day of the month** (e.g., 01 or 1st) at **00:00** (midnight).
-    2. **End Reading**: Find the row that represents the end of the monthly period.
-       - **Priority A**: **1st day of the NEXT month** at **00:00**.
-       - **Priority B**: **Last day of the CURRENT month** at **24:00**.
-       - **Priority C**: **Last day of the CURRENT month** at **00:00** (Use this if Priorities A/B are unavailable, or if it explicitly marks the period end).
-    3. **Usage**: Calculate the absolute difference: |End Value - Start Value|.
-    4. **Date Format**: Return the date string EXACTLY as "YYYY-MM-DD HH:MM". (e.g., 2023-10-01 00:00).
-    5. **OCR Correction**: Fix common digit errors (e.g. 1 vs 7, 0 vs 8, 5 vs 6) based on the sequence of numbers.
+    Rules:
+    1. Start: 1st day of month 00:00.
+    2. End: 1st day of NEXT month 00:00 OR Last day of CURRENT month 24:00.
+    3. Usage: |End - Start|.
+    4. Date Format: "YYYY-MM-DD HH:MM".
+    5. Fix OCR errors (e.g. 1 vs 7, 0 vs 8).
     
-    Return JSON format.
+    Return JSON.
   `;
 
   try {
-    // Switch to stable 'gemini-3-flash-preview' to avoid 404 errors with experimental names
-    const response = await generateContentWithRetry(
-      'gemini-3-flash-preview', 
+    // Use the fallback wrapper instead of calling specific model directly
+    const response = await generateContentWithFallback(
       {
         parts: [
           imagePart,
@@ -246,22 +229,17 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
     );
 
     const text = response.text;
-    if (!text) {
-      throw new Error("No response from Gemini.");
-    }
+    if (!text) throw new Error("No response from Gemini.");
 
     let data: GeminiResponseSchema;
     try {
       data = JSON.parse(text);
     } catch (e) {
-      console.error("Failed to parse JSON:", text);
       throw new Error("AI response was not valid JSON.");
     }
     
     const startVal = Number(data.startReading.value);
     const endVal = Number(data.endReading.value);
-
-    // Calculate usage, handling potential floating point errors
     const usage = parseFloat(Math.abs(endVal - startVal).toFixed(2));
 
     return {
@@ -271,48 +249,28 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
     };
 
   } catch (error: any) {
-    console.error("Error analyzing image:", error);
+    console.error("Analysis Error:", error);
     
-    // Improved Error Parsing
-    let errorMessage = error.message || "Failed to analyze the image.";
-
-    // Attempt to extract message from JSON string error (e.g. {"error": ...})
-    if (typeof errorMessage === 'string' && (errorMessage.startsWith('{') || errorMessage.includes('{"error"'))) {
+    let errorMessage = error.message || "Failed to analyze.";
+    
+    // Attempt to unwrap JSON error
+    if (errorMessage.includes('{')) {
         try {
-            // Sometimes the error message is wrapped in text, try to find the JSON part
             const jsonMatch = errorMessage.match(/\{.*\}/);
-            const jsonString = jsonMatch ? jsonMatch[0] : errorMessage;
-            const parsed = JSON.parse(jsonString);
-            
-            if (parsed.error?.message) {
-                errorMessage = parsed.error.message;
-            } else if (parsed.message) {
-                errorMessage = parsed.message;
-            }
-        } catch(e) {
-            // If parsing fails, use the original message
-        }
+            const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : errorMessage);
+            if (parsed.error?.message) errorMessage = parsed.error.message;
+        } catch(e) {}
     }
 
-    // User-friendly error mapping
-    const lowerMsg = errorMessage.toLowerCase();
-
-    if (lowerMsg.includes('api key is missing')) {
-      throw new Error("Setup Error: Key not found. Please set 'VITE_API_KEY' in Cloudflare Pages settings (Environment Variables).");
+    const lower = errorMessage.toLowerCase();
+    
+    if (lower.includes('api key')) {
+      throw new Error("Check your API Key configuration.");
     }
-    // We removed the 'invalid api key format' check from the top, so we don't throw it here.
-    // Instead, if the key is wrong (e.g. Project ID), Google will return a 400/403.
-    if (lowerMsg.includes('400') || lowerMsg.includes('invalid argument') || lowerMsg.includes('403')) {
-        throw new Error("API Key Invalid: The key was rejected by Google. Please check your Cloudflare VITE_API_KEY setting.");
-    }
-    if (lowerMsg.includes('429') || lowerMsg.includes('quota') || lowerMsg.includes('exhausted')) {
-       throw new Error("Server is busy (Quota Limit). Please try again in 1 minute.");
-    }
-    if (lowerMsg.includes('404') || lowerMsg.includes('not found')) {
-        throw new Error("AI Model unavailable. Please contact support or try again later.");
+    if (lower.includes('quota') || lower.includes('429')) {
+       throw new Error("High traffic: All AI models are busy. Please wait 1 minute.");
     }
     
-    // Return the cleaned up error message
     throw new Error(errorMessage);
   }
 };
