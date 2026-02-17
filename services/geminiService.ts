@@ -4,23 +4,29 @@ import { AnalysisResult, GeminiResponseSchema } from "../types";
 
 // Helper function to safely retrieve API Key from various environment configurations
 const getApiKey = (): string => {
+  let key = '';
+
   // 1. Try Vite-specific import.meta.env (Primary for Vite apps, Cloudflare Pages, Vercel)
   try {
     // @ts-ignore
     if (import.meta?.env?.VITE_API_KEY) {
       // @ts-ignore
-      return import.meta.env.VITE_API_KEY;
+      key = import.meta.env.VITE_API_KEY;
     }
   } catch (e) {}
 
   // 2. Try standard process.env (Fallback)
-  try {
-    if (typeof process !== 'undefined' && process.env?.API_KEY) {
-      return process.env.API_KEY;
-    }
-  } catch (e) {}
+  if (!key) {
+    try {
+      if (typeof process !== 'undefined' && process.env?.API_KEY) {
+        key = process.env.API_KEY || '';
+      }
+    } catch (e) {}
+  }
 
-  return '';
+  // Sanitize: Trim whitespace and remove surrounding quotes if present
+  // This handles cases where users accidentally paste "AIza..." or 'AIza...' or add spaces.
+  return key.trim().replace(/^["']|["']$/g, '');
 };
 
 // Optimization: Compress and Resize Image before sending to API
@@ -136,10 +142,8 @@ const generateContentWithRetry = async (
     throw new Error("API Key is missing");
   }
   
-  // Basic validation to prevent confusing errors when user inputs Project ID instead of Key
-  if (!apiKey.startsWith("AIza")) {
-    throw new Error("Invalid API Key format. Key must start with 'AIza'. Check your Cloudflare settings.");
-  }
+  // Removed strict 'startsWith(AIza)' check to allow flexibility.
+  // The API call itself will fail if the key is invalid, which is handled in the catch block.
   
   const ai = new GoogleGenAI({ apiKey });
 
@@ -296,8 +300,10 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
     if (lowerMsg.includes('api key is missing')) {
       throw new Error("Setup Error: Key not found. Please set 'VITE_API_KEY' in Cloudflare Pages settings (Environment Variables).");
     }
-    if (lowerMsg.includes('invalid api key format')) {
-        throw new Error("Setup Error: The API Key looks like a Project ID. Please use a key starting with 'AIza...'.");
+    // We removed the 'invalid api key format' check from the top, so we don't throw it here.
+    // Instead, if the key is wrong (e.g. Project ID), Google will return a 400/403.
+    if (lowerMsg.includes('400') || lowerMsg.includes('invalid argument') || lowerMsg.includes('403')) {
+        throw new Error("API Key Invalid: The key was rejected by Google. Please check your Cloudflare VITE_API_KEY setting.");
     }
     if (lowerMsg.includes('429') || lowerMsg.includes('quota') || lowerMsg.includes('exhausted')) {
        throw new Error("Server is busy (Quota Limit). Please try again in 1 minute.");
