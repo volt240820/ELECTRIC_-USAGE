@@ -81,7 +81,8 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
                 onClick={() => setIsFullScreen(true)}
               >
                   <div className="absolute top-0 left-0 w-full p-3 bg-gradient-to-b from-black/60 to-transparent flex justify-between items-start z-10 pointer-events-none">
-                      <span className="text-white/80 text-xs font-mono bg-black/40 px-2 py-1 rounded backdrop-blur-md border border-white/10 truncate max-w-[200px]" title={fileName}>
+                      {/* Added 'notranslate' class and translate="no" to prevent "Utility" -> "Fighter" translation */}
+                      <span className="text-white/80 text-xs font-mono bg-black/40 px-2 py-1 rounded backdrop-blur-md border border-white/10 truncate max-w-[200px] notranslate" translate="no" title={fileName}>
                           {displayName}
                       </span>
                       <span className="text-blue-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1 bg-blue-900/30 px-2 py-1 rounded border border-blue-500/30">
@@ -114,7 +115,8 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
                           <FileText className="w-5 h-5 text-blue-600" />
                       </div>
                       <div className="min-w-0 flex-1">
-                          <h3 className="font-bold text-gray-900 text-lg truncate" title={fileName}>{displayName}</h3>
+                          {/* Added 'notranslate' here as well */}
+                          <h3 className="font-bold text-gray-900 text-lg truncate notranslate" translate="no" title={fileName}>{displayName}</h3>
                           <p className="text-sm text-gray-500">Confirm reading data matches the photo</p>
                       </div>
                   </div>
