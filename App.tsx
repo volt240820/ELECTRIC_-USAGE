@@ -568,6 +568,7 @@ const App: React.FC = () => {
                         assignment={item.assignment}
                         onUpdateResult={(updated) => handleUpdateResult(item.id, updated)}
                         onUpdateAssignment={(assignment) => handleUpdateAssignment(item.id, assignment)}
+                        previewUrl={item.previewUrl || item.thumbnailUrl}
                       />
                     )}
                   </div>

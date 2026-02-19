@@ -12,6 +12,7 @@ interface AnalysisResultsProps {
   assignment: MeterAssignment;
   onUpdateResult: (updatedResult: AnalysisResult) => void;
   onUpdateAssignment: (assignment: MeterAssignment) => void;
+  previewUrl?: string;
 }
 
 export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ 
@@ -21,26 +22,17 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   tenants,
   assignment,
   onUpdateResult,
-  onUpdateAssignment
+  onUpdateAssignment,
+  previewUrl
 }) => {
   const [localResult, setLocalResult] = useState(result);
   const [isManualInput, setIsManualInput] = useState(false);
-  const [imageUrl, setImageUrl] = useState<string>('');
   const [isFullScreen, setIsFullScreen] = useState(false);
 
   // Sync local state when prop changes
   useEffect(() => {
     setLocalResult(result);
   }, [result]);
-
-  // Create object URL for image preview
-  useEffect(() => {
-    if (file) {
-      const url = URL.createObjectURL(file);
-      setImageUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-  }, [file]);
 
   const selectedTenant = useMemo(() => 
     tenants.find(t => t.id === assignment.tenantId), 
@@ -97,9 +89,9 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
                     </div>
                   </div>
                   
-                  {imageUrl && (
+                  {previewUrl && (
                       <img 
-                          src={imageUrl} 
+                          src={previewUrl} 
                           alt="Meter Reading" 
                           className="max-w-full max-h-[600px] object-contain shadow-2xl transition-transform duration-300 group-hover:scale-105" 
                       />
@@ -275,7 +267,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
           </button>
           
           <img 
-            src={imageUrl} 
+            src={previewUrl} 
             alt="Full size meter reading" 
             className="max-w-full max-h-[90vh] object-contain rounded-md shadow-2xl animate-zoom-in cursor-default"
             onClick={(e) => e.stopPropagation()} 
