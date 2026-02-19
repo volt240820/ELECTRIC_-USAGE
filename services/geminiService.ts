@@ -35,8 +35,8 @@ const compressImage = async (file: File): Promise<string> => {
       const canvas = document.createElement('canvas');
       let { width, height } = img;
       
-      // 800px is sufficient for meter digits and drastically reduces payload/latency
-      const MAX_SIZE = 800;
+      // Increased to 1536px to improve OCR accuracy for dense tables and small text
+      const MAX_SIZE = 1536;
       if (width > height && width > MAX_SIZE) {
         height = Math.round((height * MAX_SIZE) / width);
         width = MAX_SIZE;
@@ -55,12 +55,16 @@ const compressImage = async (file: File): Promise<string> => {
         return;
       }
       
+      // Use white background to handle transparent images correctly
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, width, height);
+      // Use high quality image smoothing
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, width, height);
       
-      // 0.6 quality is optimal for text readability while minimizing size
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      // 0.8 quality for better detail retention
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
       URL.revokeObjectURL(url);
       resolve(dataUrl.split(',')[1]); 
     };
@@ -115,9 +119,9 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // Fallback Strategy: List of models to try in order
 // If the experimental 3.0 model is busy (429), we fall back to 2.0 or Stable Flash
 const MODELS_TO_TRY = [
-  'gemini-3-flash-preview', // Primary: Smartest
-  'gemini-2.0-flash-exp',   // Secondary: Fast & generous limits
-  'gemini-flash-latest'     // Tertiary: Most stable
+  'gemini-2.0-flash-exp',   // Primary: Excellent vision capabilities
+  'gemini-1.5-pro',         // Secondary: High reasoning
+  'gemini-1.5-flash'        // Tertiary: Fast & stable
 ];
 
 const generateContentWithFallback = async (contents: any, config: any) => {
@@ -180,16 +184,24 @@ export const analyzeMeterImage = async (file: File): Promise<AnalysisResult> => 
   };
 
   const prompt = `
-    Analyze this utility log table. Extract Start/End readings for monthly usage.
+    Analyze this utility meter reading log (e.g., 3D Utility or similar software interface).
+    Your task is to extract the most recent complete month's usage data with EXTREME PRECISION.
+
+    Step-by-Step Instructions:
+    1. Identify the table structure. Look for headers like 'Date', 'Time', 'Value', 'Reading', 'Total', 'kWh'.
+    2. Locate the row for the START of the month (e.g., 1st day at 00:00).
+    3. Locate the row for the END of the month (e.g., 1st day of NEXT month at 00:00 OR last day of CURRENT month at 24:00).
+    4. Extract the reading values exactly as they appear in the image.
+    5. CRITICAL: Pay close attention to decimal points. Do not miss them.
+    6. CRITICAL: Distinguish between similar digits (1 vs 7, 0 vs 8, 5 vs 6, 3 vs 8).
+    7. If multiple columns exist, find the 'Active Energy' or 'Cumulative' column.
     
     Rules:
-    1. Start: 1st day of month 00:00.
-    2. End: 1st day of NEXT month 00:00 OR Last day of CURRENT month 24:00.
-    3. Usage: |End - Start|.
-    4. Date Format: "YYYY-MM-DD HH:MM".
-    5. Fix OCR errors (e.g. 1 vs 7, 0 vs 8).
-    
-    Return JSON.
+    - Usage = |End Reading - Start Reading|
+    - Date Format: "YYYY-MM-DD HH:MM"
+    - If the image is blurry, do your best to infer from context (e.g. increasing values).
+
+    Return the result in the specified JSON format.
   `;
 
   try {
