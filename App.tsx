@@ -4,20 +4,9 @@ import { ImageUploader } from './components/ImageUploader';
 import { AnalysisResults } from './components/AnalysisResults';
 import { Invoice } from './components/Invoice';
 import { analyzeMeterImage } from './services/geminiService';
-import { AnalysisResult, Tenant, MeterAssignment } from './types';
+import { AnalysisResult, Tenant, MeterAssignment, AnalysisItem } from './types';
 import { Activity, AlertCircle, Loader2, Settings, Users, FileText, ChevronRight, Plus, X, Trash2, Building, RotateCcw } from 'lucide-react';
 
-interface AnalysisItem {
-  id: string;
-  file: File;
-  status: 'idle' | 'analyzing' | 'success' | 'error';
-  result?: AnalysisResult;
-  error?: string;
-  // Assignment data
-  assignment: MeterAssignment;
-  isShared?: boolean; // Flag to indicate if this item came from a shared link
-  thumbnailUrl?: string; // Store base64 thumbnail for shared view
-}
 
 const DEFAULT_TENANTS: Tenant[] = [
   { id: 't1', name: 'A Corp', meters: ['1F Main', '1F Server', '1F AC'] },
@@ -130,6 +119,15 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      items.forEach(item => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      });
+    };
+  }, []); // Only on unmount
+
   const handleImagesSelect = (files: File[]) => {
     // Sort newly selected files by name naturally (e.g. "Meter 1", "Meter 2", "Meter 10")
     // This ensures the order in the UI matches the user's file explorer order
@@ -140,6 +138,7 @@ const App: React.FC = () => {
     const newItems: AnalysisItem[] = sortedFiles.map(file => ({
       id: Math.random().toString(36).substr(2, 9),
       file,
+      previewUrl: URL.createObjectURL(file),
       status: 'idle',
       assignment: { tenantId: '', meterName: '' }
     }));
@@ -147,10 +146,15 @@ const App: React.FC = () => {
   };
 
   const handleRemoveImage = (index: number) => {
+    const itemToRemove = items[index];
+    if (itemToRemove.previewUrl) URL.revokeObjectURL(itemToRemove.previewUrl);
     setItems(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleClearAll = () => {
+    items.forEach(item => {
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    });
     setItems([]);
   };
 
@@ -492,7 +496,7 @@ const App: React.FC = () => {
               
               <ImageUploader 
                 onImagesSelect={handleImagesSelect} 
-                selectedFiles={items.map(i => i.file)}
+                items={items}
                 onRemove={handleRemoveImage}
               />
               

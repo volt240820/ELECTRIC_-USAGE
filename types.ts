@@ -30,3 +30,15 @@ export interface MeterAssignment {
   tenantId: string; // ID of the company (A, B, C)
   meterName: string; // e.g., "1F AC", "Server Room"
 }
+
+export interface AnalysisItem {
+  id: string;
+  file: File;
+  status: 'idle' | 'analyzing' | 'success' | 'error';
+  result?: AnalysisResult;
+  error?: string;
+  assignment: MeterAssignment;
+  isShared?: boolean; // Flag to indicate if this item came from a shared link
+  thumbnailUrl?: string; // Store base64 thumbnail for shared view
+  previewUrl?: string; // Store object URL for local preview
+}

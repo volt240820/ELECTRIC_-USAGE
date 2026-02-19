@@ -1,27 +1,16 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { Upload, X, Image as ImageIcon, Plus } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Upload, X, Plus } from 'lucide-react';
+import { AnalysisItem } from '../types';
 
 interface ImageUploaderProps {
   onImagesSelect: (files: File[]) => void;
-  selectedFiles: File[];
+  items: AnalysisItem[];
   onRemove: (index: number) => void;
 }
 
-export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImagesSelect, selectedFiles, onRemove }) => {
+export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImagesSelect, items, onRemove }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [previews, setPreviews] = useState<string[]>([]);
-
-  useEffect(() => {
-    // Create object URLs for previews
-    const newPreviews = selectedFiles.map(file => URL.createObjectURL(file));
-    setPreviews(newPreviews);
-
-    // Cleanup URLs on unmount or when files change
-    return () => {
-      newPreviews.forEach(url => URL.revokeObjectURL(url));
-    };
-  }, [selectedFiles]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -55,19 +44,19 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImagesSelect, se
     }
   };
 
-  if (selectedFiles.length > 0) {
+  if (items.length > 0) {
     return (
       <div className="w-full space-y-4">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-          {selectedFiles.map((file, index) => (
-            <div key={`${file.name}-${index}`} className="relative group aspect-square rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          {items.map((item, index) => (
+            <div key={`${item.file.name}-${index}`} className="relative group aspect-square rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
               <img 
-                src={previews[index]} 
+                src={item.previewUrl || item.thumbnailUrl} 
                 alt={`Preview ${index}`} 
                 className="w-full h-full object-cover"
               />
               <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-2">
-                 <p className="text-white text-xs font-medium truncate w-full text-center mb-2 px-1">{file.name}</p>
+                 <p className="text-white text-xs font-medium truncate w-full text-center mb-2 px-1">{item.file.name}</p>
                  <button 
                   onClick={(e) => { e.stopPropagation(); onRemove(index); }}
                   className="p-1.5 bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors"
